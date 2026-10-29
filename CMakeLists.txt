@@ -490,6 +490,7 @@ if(PURIFY_BUILD_TESTS)
         tests/puresign_tests.cpp
         tests/legacy_bulletproof_tests.cpp
         tests/expected_tests.cpp
+        tests/aggregate_nonce_tests.cpp
         ${PURIFY_HEADER_HYGIENE_SOURCES}
     )
 
@@ -510,6 +511,8 @@ if(PURIFY_BUILD_TESTS)
     purify_add_cpp_suite_test(puresign)
     purify_add_cpp_suite_test(legacy_bulletproof)
     purify_add_cpp_suite_test(expected)
+    purify_add_cpp_suite_test(aggregate_nonce)
+    purify_add_cpp_suite_test(aggregate_nonce_100)
 
     add_executable(purify_property_tests
         tests/purify_property_tests.cpp
