@@ -311,6 +311,7 @@ add_library(purify
     src/api/c_api.cpp
     src/api/api.cpp
     src/protocol/bulletproof.cpp
+    src/protocol/nonce_batch.cpp
     src/support/curve.cpp
     src/protocol/expr.cpp
     src/legacy_bulletproof/scratch_frames.c
@@ -398,6 +399,7 @@ if(PURIFY_BUILD_BENCH)
         src/api/c_api.cpp
         src/api/api.cpp
         src/protocol/bulletproof.cpp
+        src/protocol/nonce_batch.cpp
         src/support/curve.cpp
         src/protocol/expr.cpp
         src/legacy_bulletproof/scratch_frames.c
@@ -496,6 +498,7 @@ if(PURIFY_BUILD_TESTS)
         tests/legacy_bulletproof_tests.cpp
         tests/expected_tests.cpp
         tests/aggregate_nonce_tests.cpp
+        tests/nonce_batch_tests.cpp
         ${PURIFY_HEADER_HYGIENE_SOURCES}
     )
 
@@ -518,6 +521,7 @@ if(PURIFY_BUILD_TESTS)
     purify_add_cpp_suite_test(expected)
     purify_add_cpp_suite_test(aggregate_nonce)
     purify_add_cpp_suite_test(aggregate_nonce_100)
+    purify_add_cpp_suite_test(nonce_batch)
 
     add_executable(purify_property_tests
         tests/purify_property_tests.cpp
