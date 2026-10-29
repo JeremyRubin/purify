@@ -1415,7 +1415,7 @@ int purify_bulletproof_verify_circuit_with_resources(purify_bulletproof_backend_
                                                   extra_commit, extra_commit_len, proof, proof_len);
 }
 
-static void purify_norm_arg_commit_initial_data(secp256k1_sha256* transcript, const secp256k1_scalar* rho,
+static int purify_norm_arg_commit_initial_data(secp256k1_sha256* transcript, const secp256k1_scalar* rho,
                                                 const secp256k1_bppp_generators* gens_vec, size_t g_len,
                                                 const secp256k1_scalar* c_vec, size_t c_vec_len,
                                                 const secp256k1_ge* commit) {
@@ -1424,7 +1424,11 @@ static void purify_norm_arg_commit_initial_data(secp256k1_sha256* transcript, co
     secp256k1_ge comm = *commit;
 
     secp256k1_bppp_sha256_tagged_commitment_init(transcript);
-    purify_serialize_point(ser_commit, &comm);
+    /* The bridge's norm statement uses finite compressed points. Reject a
+     * representation the transcript cannot serialize before hashing it. */
+    if (!purify_serialize_point(ser_commit, &comm)) {
+        return 0;
+    }
     secp256k1_sha256_write(transcript, ser_commit, sizeof(ser_commit));
     secp256k1_scalar_get_b32(ser_scalar, rho);
     secp256k1_sha256_write(transcript, ser_scalar, sizeof(ser_scalar));
@@ -1434,7 +1438,9 @@ static void purify_norm_arg_commit_initial_data(secp256k1_sha256* transcript, co
     secp256k1_sha256_write(transcript, ser_le64, sizeof(ser_le64));
     for (i = 0; i < gens_vec->n; ++i) {
         secp256k1_ge gen = gens_vec->gens[i];
-        purify_serialize_point(ser_commit, &gen);
+        if (!purify_serialize_point(ser_commit, &gen)) {
+            return 0;
+        }
         secp256k1_sha256_write(transcript, ser_commit, sizeof(ser_commit));
     }
     secp256k1_bppp_le64(ser_le64, c_vec_len);
@@ -1443,6 +1449,7 @@ static void purify_norm_arg_commit_initial_data(secp256k1_sha256* transcript, co
         secp256k1_scalar_get_b32(ser_scalar, &c_vec[i]);
         secp256k1_sha256_write(transcript, ser_scalar, sizeof(ser_scalar));
     }
+    return 1;
 }
 
 static int purify_copy_vectors_into_scratch(const secp256k1_context* ctx, secp256k1_scratch_space* scratch,
@@ -1918,7 +1925,9 @@ static int purify_bppp_prove_norm_arg_impl(purify_secp_context* context,
     if (!purify_serialize_point(commitment_out33, &commit)) {
         goto cleanup;
     }
-    purify_norm_arg_commit_initial_data(&transcript, &rho, gens, n_vec_len, c_vec, c_vec_len, &commit);
+    if (!purify_norm_arg_commit_initial_data(&transcript, &rho, gens, n_vec_len, c_vec, c_vec_len, &commit)) {
+        goto cleanup;
+    }
     ok = purify_bppp_rangeproof_norm_product_prove_const(ctx, scratch, proof_out, proof_len, &transcript, &rho,
                                                          gens->gens, gens->n, n_vec, n_vec_len, l_vec, l_vec_len, c_vec, c_vec_len);
 
@@ -2033,7 +2042,9 @@ static int purify_bppp_prove_norm_arg_to_commitment_impl(purify_secp_context* co
     if (secp256k1_memcmp_var(expected_commitment33, commitment33, sizeof(expected_commitment33)) != 0) {
         goto cleanup;
     }
-    purify_norm_arg_commit_initial_data(&transcript, &rho, gens, n_vec_len, c_vec, c_vec_len, &commitment_ge);
+    if (!purify_norm_arg_commit_initial_data(&transcript, &rho, gens, n_vec_len, c_vec, c_vec_len, &commitment_ge)) {
+        goto cleanup;
+    }
     ok = purify_bppp_rangeproof_norm_product_prove_const(ctx, scratch, proof_out, proof_len, &transcript, &rho,
                                                          gens->gens, gens->n, n_vec, n_vec_len, l_vec, l_vec_len, c_vec, c_vec_len);
 
@@ -2117,7 +2128,9 @@ static int purify_bppp_verify_norm_arg_impl(purify_secp_context* context,
     if (!purify_parse_scalar_array(c_vec32, c_vec_len, c_vec)) {
         goto cleanup;
     }
-    purify_norm_arg_commit_initial_data(&transcript, &rho, gens, n_vec_len, c_vec, c_vec_len, &commit);
+    if (!purify_norm_arg_commit_initial_data(&transcript, &rho, gens, n_vec_len, c_vec, c_vec_len, &commit)) {
+        goto cleanup;
+    }
     ok = secp256k1_bppp_rangeproof_norm_product_verify(ctx, scratch, proof, proof_len, &transcript, &rho,
                                                        gens, n_vec_len, c_vec, c_vec_len, &commit);
 

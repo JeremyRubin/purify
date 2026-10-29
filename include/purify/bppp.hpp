@@ -111,6 +111,7 @@ struct NormArgProof {
     std::vector<PointBytes> generators;
     std::vector<ScalarBytes> c_vec;
     std::size_t n_vec_len = 0;
+    /** @brief Finite compressed initial point; infinity is not accepted. */
     PointBytes commitment{};
     Bytes proof;
 };
