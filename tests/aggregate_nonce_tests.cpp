@@ -139,12 +139,85 @@ void test_sum_bindings(TestContext& ctx) {
                "composition rejects a missing member");
 }
 
+void test_sum_proof(TestContext& ctx) {
+    auto context = purify::make_secp_context();
+    ctx.expect(context != nullptr, "aggregate proof context creates");
+    if (context == nullptr) return;
+    const purify::Bytes input = purify::bytes_from_ascii("Purify/AggregateCircuit/Proof/V1");
+    auto circuit_template = purify::verifier_circuit_template(input);
+    expect_ok(ctx, circuit_template, "aggregate proof template builds");
+    if (!circuit_template.has_value()) return;
+    Members members;
+    if (!prepare_members(ctx, input, 3, members)) return;
+    auto circuit = circuit_template->instantiate_sum(members.hosts);
+    auto assignment = circuit_template->sum_assignments(members.hosts, members.assignments);
+    expect_ok(ctx, circuit, "proof circuit instantiates");
+    expect_ok(ctx, assignment, "proof assignment composes");
+    if (!circuit.has_value() || !assignment.has_value()) return;
+    std::array<unsigned char, 32> proof_nonce{};
+    proof_nonce.fill(0x52);
+    const auto generator = purify::bppp::base_generator(context.get());
+    const auto binding = purify::bytes_from_ascii("Purify/AggregateCircuit/ArithmeticProof/V1");
+    // Imported arithmetic-circuit backend, not the experimental BP++ wrapper.
+    auto proof = purify::prove_experimental_circuit(
+        *circuit, *assignment, proof_nonce, generator, context.get(), binding);
+    expect_ok(ctx, proof, "aggregate arithmetic proof produces");
+    if (!proof.has_value()) return;
+    const std::array<unsigned char, 32> zero{};
+    auto expected_nonce = purify::bppp::pedersen_commit_char(
+        zero, members.total.to_bytes_be(), context.get(), generator,
+        purify::bppp::value_generator_h(context.get()));
+    expect_ok(ctx, expected_nonce, "independent summed nonce point constructs");
+    if (expected_nonce.has_value()) {
+        ctx.expect(proof->commitment == *expected_nonce, "proof commits exactly to sum(r_i) times G");
+    }
+    auto encoded = proof->serialize();
+    expect_ok(ctx, encoded, "aggregate proof serializes");
+    if (!encoded.has_value()) return;
+    auto decoded = purify::ExperimentalBulletproofProof::deserialize(*encoded);
+    expect_ok(ctx, decoded, "aggregate proof parses");
+    if (!decoded.has_value()) return;
+    auto verified = purify::verify_experimental_circuit(
+        *circuit, *decoded, generator, context.get(), binding);
+    expect_ok(ctx, verified, "aggregate arithmetic verification runs");
+    if (verified.has_value()) ctx.expect(*verified, "serialized aggregate arithmetic proof verifies");
+
+    auto changed_binding = binding;
+    changed_binding.back() ^= 1;
+    auto wrong_binding = purify::verify_experimental_circuit(
+        *circuit, *proof, generator, context.get(), changed_binding);
+    ctx.expect(!wrong_binding.has_value() || !*wrong_binding, "proof rejects changed statement binding");
+
+    std::reverse(members.hosts.begin(), members.hosts.end());
+    auto reordered = circuit_template->instantiate_sum(members.hosts);
+    expect_ok(ctx, reordered, "reordered public proof circuit builds");
+    if (reordered.has_value()) {
+        auto wrong_roster = purify::verify_experimental_circuit(
+            *reordered, *proof, generator, context.get(), binding);
+        ctx.expect(!wrong_roster.has_value() || !*wrong_roster,
+                   "proof rejects a changed roster order even though its nonce sum is unchanged");
+    }
+
+    auto other_point = purify::bppp::pedersen_commit_char(
+        zero, (members.total + purify::FieldElement::one()).to_bytes_be(),
+        context.get(), generator, purify::bppp::value_generator_h(context.get()));
+    expect_ok(ctx, other_point, "different valid nonce point constructs");
+    if (other_point.has_value()) {
+        auto changed_nonce = *proof;
+        changed_nonce.commitment = *other_point;
+        auto wrong_nonce = purify::verify_experimental_circuit(
+            *circuit, changed_nonce, generator, context.get(), binding);
+        ctx.expect(!wrong_nonce.has_value() || !*wrong_nonce, "proof rejects a changed aggregate nonce point");
+    }
+}
+
 } // namespace
 
 void run_aggregate_nonce_tests(TestContext& ctx) {
     test_sum_circuit(ctx, 1);
     test_sum_circuit(ctx, 3);
     test_sum_bindings(ctx);
+    test_sum_proof(ctx);
 }
 
 void run_aggregate_nonce_100_tests(TestContext& ctx) {
