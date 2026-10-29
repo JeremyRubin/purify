@@ -1505,7 +1505,7 @@ static int purify_bppp_rangeproof_norm_product_prove_const(const secp256k1_conte
 
 size_t purify_bppp_required_proof_size(size_t n_vec_len, size_t c_vec_len) {
     size_t log_g_len, log_h_len, max_log_len, proof_size = 0;
-    if (n_vec_len == 0 || c_vec_len == 0) {
+    if (n_vec_len == 0 || c_vec_len == 0 || n_vec_len < c_vec_len) {
         return 0;
     }
     log_g_len = secp256k1_bppp_log2(n_vec_len);
@@ -1879,7 +1879,8 @@ static int purify_bppp_prove_norm_arg_impl(purify_secp_context* context,
         commitment_out33 == NULL || proof_out == NULL || proof_len == NULL) {
         return 0;
     }
-    if (n_vec_len == 0 || l_vec_len == 0 || c_vec_len == 0 || l_vec_len != c_vec_len) {
+    if (n_vec_len == 0 || l_vec_len == 0 || c_vec_len == 0 || l_vec_len != c_vec_len ||
+        n_vec_len < c_vec_len) {
         return 0;
     }
     if (!secp256k1_is_power_of_two(n_vec_len) || !secp256k1_is_power_of_two(c_vec_len) ||
@@ -1993,7 +1994,8 @@ static int purify_bppp_prove_norm_arg_to_commitment_impl(purify_secp_context* co
         commitment33 == NULL || proof_out == NULL || proof_len == NULL) {
         return 0;
     }
-    if (n_vec_len == 0 || l_vec_len == 0 || c_vec_len == 0 || l_vec_len != c_vec_len) {
+    if (n_vec_len == 0 || l_vec_len == 0 || c_vec_len == 0 || l_vec_len != c_vec_len ||
+        n_vec_len < c_vec_len) {
         return 0;
     }
     if (!secp256k1_is_power_of_two(n_vec_len) || !secp256k1_is_power_of_two(c_vec_len) ||
@@ -2102,7 +2104,9 @@ static int purify_bppp_verify_norm_arg_impl(purify_secp_context* context,
     if (ctx == NULL || rho32 == NULL || (resources == NULL && generators33 == NULL) || c_vec32 == NULL || commitment33 == NULL || proof == NULL) {
         return 0;
     }
-    if (n_vec_len == 0 || c_vec_len == 0 ||
+    /* Four-fork norm extraction requires a paired norm coordinate in every
+     * nonterminal round. A linear-only tail does not preserve that relation. */
+    if (n_vec_len == 0 || c_vec_len == 0 || n_vec_len < c_vec_len ||
         !purify_bridge_checked_add_size(n_vec_len, c_vec_len, &expected_generators) ||
         generators_count != expected_generators ||
         !purify_bridge_checked_mul_size(generators_count, 33u, &serialized_generators_len)) {

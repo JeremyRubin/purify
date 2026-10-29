@@ -14,6 +14,7 @@ namespace {
 
 using purify::FieldElement;
 using purify_test::TestContext;
+using purify_test::expect_error;
 using purify_test::expect_ok;
 
 void check_initial_point_boundary(TestContext& ctx) {
@@ -74,8 +75,53 @@ void check_initial_point_boundary(TestContext& ctx) {
                "norm commitment creation also rejects initial infinity");
 }
 
+void check_norm_length_boundary(TestContext& ctx) {
+    auto secp = purify::make_secp_context();
+    ctx.expect(secp != nullptr, "norm length context creates");
+    if (!secp) return;
+    auto generators = purify::bppp::create_generators(10, secp.get());
+    expect_ok(ctx, generators, "norm length generators create");
+    if (!generators) return;
+    const auto one = FieldElement::one().to_bytes_be();
+    purify::bppp::NormArgInputs inputs{FieldElement::from_int(3).to_bytes_be(),
+        *generators, {one, one}, std::vector(8, one), std::vector(8, one)};
+    auto commitment = purify::bppp::commit_norm_arg(inputs, secp.get());
+    expect_ok(ctx, commitment, "unsupported proof shape still has a mathematical commitment");
+    if (!commitment) return;
+    ctx.expect(purify_bppp_required_proof_size(2, 8) == 0,
+               "proof sizing excludes linear-only norm tails");
+    expect_error(ctx, purify::bppp::prove_norm_arg(inputs, secp.get()),
+               purify::ErrorCode::InvalidDimensions,
+               "ordinary prover rejects norm length below linear length");
+    expect_error(ctx, purify::bppp::prove_norm_arg_to_commitment(inputs, *commitment, secp.get()),
+               purify::ErrorCode::InvalidDimensions,
+               "anchored prover rejects norm length below linear length");
+    purify::bppp::NormArgProof unsupported{
+        inputs.rho, *generators, inputs.c_vec, 2, *commitment, purify::Bytes(259, 0)};
+    ctx.expect(!purify::bppp::verify_norm_arg(unsupported, secp.get()),
+               "ordinary verifier rejects unsupported dimensions before proof parsing");
+
+    purify::Bytes generator_bytes, c_bytes;
+    for (const auto& generator : *generators) {
+        generator_bytes.insert(generator_bytes.end(), generator.begin(), generator.end());
+    }
+    for (const auto& c : inputs.c_vec) c_bytes.insert(c_bytes.end(), c.begin(), c.end());
+    using Resources = std::unique_ptr<purify_bppp_backend_resources,
+        decltype(&purify_bppp_backend_resources_destroy)>;
+    Resources resources(purify_bppp_backend_resources_create(
+        secp.get(), generator_bytes.data(), generators->size()),
+        purify_bppp_backend_resources_destroy);
+    ctx.expect(resources != nullptr, "cached norm length resources create");
+    if (!resources) return;
+    ctx.expect(purify_bppp_verify_norm_arg_with_resources(
+        resources.get(), inputs.rho.data(), c_bytes.data(), 8, 2, commitment->data(),
+        unsupported.proof.data(), unsupported.proof.size()) == 0,
+        "cached verification applies the same norm length boundary");
+}
+
 } // namespace
 
 void run_norm_protocol_tests(TestContext& ctx) {
     check_initial_point_boundary(ctx);
+    check_norm_length_boundary(ctx);
 }
