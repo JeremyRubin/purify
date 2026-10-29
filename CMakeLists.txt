@@ -505,6 +505,7 @@ if(PURIFY_BUILD_TESTS)
         tests/aggregate_nonce_tests.cpp
         tests/nonce_batch_tests.cpp
         tests/nonce_certificate_tests.cpp
+        tests/norm_protocol_tests.cpp
         ${PURIFY_HEADER_HYGIENE_SOURCES}
     )
 
@@ -529,6 +530,7 @@ if(PURIFY_BUILD_TESTS)
     purify_add_cpp_suite_test(aggregate_nonce_100)
     purify_add_cpp_suite_test(nonce_batch)
     purify_add_cpp_suite_test(nonce_certificate)
+    purify_add_cpp_suite_test(norm_protocol)
 
     add_executable(purify_property_tests
         tests/purify_property_tests.cpp

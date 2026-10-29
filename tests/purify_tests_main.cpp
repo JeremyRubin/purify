@@ -18,6 +18,7 @@ void run_aggregate_nonce_tests(TestContext& ctx);
 void run_aggregate_nonce_100_tests(TestContext& ctx);
 void run_nonce_batch_tests(TestContext& ctx);
 void run_nonce_certificate_tests(TestContext& ctx);
+void run_norm_protocol_tests(TestContext& ctx);
 
 namespace {
 
@@ -28,7 +29,7 @@ struct SuiteSpec {
     SuiteFn run;
 };
 
-constexpr std::array<SuiteSpec, 8> kSuites{{
+constexpr std::array<SuiteSpec, 9> kSuites{{
     {"core", &run_purify_tests},
     {"puresign", &run_puresign_tests},
     {"legacy_bulletproof", &run_legacy_bulletproof_tests},
@@ -37,6 +38,7 @@ constexpr std::array<SuiteSpec, 8> kSuites{{
     {"aggregate_nonce_100", &run_aggregate_nonce_100_tests},
     {"nonce_batch", &run_nonce_batch_tests},
     {"nonce_certificate", &run_nonce_certificate_tests},
+    {"norm_protocol", &run_norm_protocol_tests},
 }};
 
 const SuiteSpec* find_suite(std::string_view name) {
