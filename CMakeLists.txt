@@ -457,6 +457,11 @@ if(PURIFY_BUILD_BENCH)
     target_link_libraries(bench_aggregate_nonce PRIVATE purify::purify)
     purify_enable_warnings(bench_aggregate_nonce)
     purify_enable_sanitizers(bench_aggregate_nonce)
+
+    add_executable(bench_nonce_batch bench/bench_nonce_batch.cpp)
+    target_link_libraries(bench_nonce_batch PRIVATE purify::purify)
+    purify_enable_warnings(bench_nonce_batch)
+    purify_enable_sanitizers(bench_nonce_batch)
 endif()
 
 if(PURIFY_BUILD_TESTS OR PURIFY_BUILD_CBMC)
