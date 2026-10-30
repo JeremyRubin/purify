@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "purify/bulletproof.hpp"
+#include "purify/bppp.hpp"
 
 namespace purify {
 
@@ -48,5 +49,50 @@ Result<NativeBulletproofCircuit> nonce_batch_circuit(
 Result<BulletproofAssignmentData> nonce_batch_assignments(
     std::span<const NonceBatchGroup> groups,
     std::span<const std::vector<BulletproofAssignmentData>> assignments);
+
+/**
+ * @brief Experimental BP++ batch artifact with ordered public outputs.
+ *
+ * This prototype uses the existing experimental BP++ circuit wrapper and
+ * is intended for integration testing only. It is not a production proof
+ * system. The application supplies the ordered groups separately.
+ *
+ * The v1 frame contains a version byte, little-endian 32-bit output count
+ * and inner proof size, the ordered 33-byte outputs, two 33-byte outer
+ * commitments, a 32-byte scalar, and the inner proof. Parsing checks the
+ * frame size; point and scalar validation occurs during verification.
+ */
+struct ExperimentalNonceBatchBpppProof {
+    static constexpr unsigned char kSerializationVersion = 1;
+    static constexpr std::size_t kMaxOutputs = 4096;
+    static constexpr std::size_t kMaxProofBytes = 65536;
+
+    std::vector<bppp::PointBytes> outputs;
+    bppp::ExperimentalCircuitZkNormArgProof proof;
+
+    Result<Bytes> serialize() const;
+    static Result<ExperimentalNonceBatchBpppProof> deserialize(std::span<const unsigned char> bytes);
+};
+
+/**
+ * @brief Centrally build one experimental BP++ proof for the ordered groups.
+ *
+ * The caller supplies every member's witness assignment. Each output is
+ * represented by its compressed secp256k1 point in group order.
+ */
+Result<ExperimentalNonceBatchBpppProof> prove_experimental_nonce_batch_bppp(
+    std::span<const NonceBatchGroup> groups,
+    std::span<const std::vector<BulletproofAssignmentData>> assignments,
+    const bppp::ScalarBytes& nonce, purify_secp_context* secp_context,
+    std::span<const unsigned char> statement_binding = {},
+    bppp::ExperimentalCircuitBackend* cache = nullptr);
+
+/** @brief Verify an experimental BP++ batch artifact using only public groups. */
+Result<bool> verify_experimental_nonce_batch_bppp(
+    std::span<const NonceBatchGroup> groups,
+    const ExperimentalNonceBatchBpppProof& proof,
+    purify_secp_context* secp_context,
+    std::span<const unsigned char> statement_binding = {},
+    bppp::ExperimentalCircuitBackend* cache = nullptr);
 
 } // namespace purify

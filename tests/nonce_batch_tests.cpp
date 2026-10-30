@@ -95,6 +95,53 @@ void test_batch_relation(TestContext& ctx) {
                    "independent witnesses satisfy the combined circuit");
     }
 
+    auto secp = purify::make_secp_context();
+    ctx.expect(secp != nullptr, "batch BP++ context creates");
+    if (secp != nullptr) {
+        purify::bppp::ScalarBytes nonce{};
+        nonce[0] = 0xb8;
+        const auto binding = purify::bytes_from_ascii("batch-bppp-prototype-v1");
+        auto proof = purify::prove_experimental_nonce_batch_bppp(
+            individual_groups, individual_assignments, nonce, secp.get(), binding);
+        expect_ok(ctx, proof, "independent statements produce one experimental BP++ proof");
+        if (proof.has_value()) {
+            ctx.expect(proof->outputs.size() == individual_groups.size(), "batch proof retains ordered outputs");
+            auto encoded = proof->serialize();
+            expect_ok(ctx, encoded, "batch BP++ artifact serializes");
+            if (encoded.has_value()) {
+                auto decoded = purify::ExperimentalNonceBatchBpppProof::deserialize(*encoded);
+                expect_ok(ctx, decoded, "batch BP++ artifact parses");
+                if (decoded.has_value()) {
+                    ctx.expect(decoded->outputs == proof->outputs && decoded->proof.proof == proof->proof.proof &&
+                                   decoded->proof.a_commitment == proof->proof.a_commitment &&
+                                   decoded->proof.s_commitment == proof->proof.s_commitment && decoded->proof.t2 == proof->proof.t2,
+                               "batch proof frame retains outputs and proof");
+                    auto verified = purify::verify_experimental_nonce_batch_bppp(
+                        individual_groups, *decoded, secp.get(), binding);
+                    ctx.expect(verified.has_value() && *verified, "public inputs verify the parsed batch artifact");
+                    auto reversed_outputs = *decoded;
+                    std::swap(reversed_outputs.outputs[0], reversed_outputs.outputs[1]);
+                    auto reversed_result = purify::verify_experimental_nonce_batch_bppp(
+                        individual_groups, reversed_outputs, secp.get(), binding);
+                    ctx.expect(!reversed_result.has_value() || !*reversed_result,
+                               "ordered batch outputs cannot be exchanged");
+                }
+                auto truncated = *encoded;
+                truncated.pop_back();
+                ctx.expect(!purify::ExperimentalNonceBatchBpppProof::deserialize(truncated).has_value(),
+                           "truncated batch artifact rejects");
+                auto extra = *encoded;
+                extra.push_back(0);
+                ctx.expect(!purify::ExperimentalNonceBatchBpppProof::deserialize(extra).has_value(),
+                           "trailing batch artifact bytes reject");
+                auto wrong_version = *encoded;
+                wrong_version[0]++;
+                ctx.expect(!purify::ExperimentalNonceBatchBpppProof::deserialize(wrong_version).has_value(),
+                           "unknown batch artifact version rejects");
+            }
+        }
+    }
+
     auto changed = *assignment;
     changed.commitments[0] = changed.commitments[0] + purify::FieldElement::one();
     changed.commitments[1] = changed.commitments[1] - purify::FieldElement::one();

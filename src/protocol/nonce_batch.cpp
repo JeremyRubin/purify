@@ -4,6 +4,7 @@
 
 #include "purify/nonce_batch.hpp"
 
+#include <algorithm>
 #include <bit>
 #include <limits>
 #include <utility>
@@ -111,6 +112,113 @@ Result<BulletproofAssignmentData> nonce_batch_assignments(
     result.right.resize(gates, FieldElement::zero());
     result.output.resize(gates, FieldElement::zero());
     return result;
+}
+
+Result<Bytes> ExperimentalNonceBatchBpppProof::serialize() const {
+    if (outputs.empty() || outputs.size() > kMaxOutputs ||
+        proof.proof.empty() || proof.proof.size() > kMaxProofBytes) {
+        return unexpected_error(ErrorCode::UnexpectedSize, "nonce_batch_bppp:serialize_size");
+    }
+    Bytes out;
+    out.reserve(9 + outputs.size() * 33 + 98 + proof.proof.size());
+    out.push_back(kSerializationVersion);
+    const auto append_u32 = [&out](std::uint32_t value) {
+        for (unsigned int i = 0; i < 4; ++i) out.push_back(static_cast<unsigned char>(value >> (8 * i)));
+    };
+    append_u32(static_cast<std::uint32_t>(outputs.size()));
+    append_u32(static_cast<std::uint32_t>(proof.proof.size()));
+    for (const auto& point : outputs) out.insert(out.end(), point.begin(), point.end());
+    out.insert(out.end(), proof.a_commitment.begin(), proof.a_commitment.end());
+    out.insert(out.end(), proof.s_commitment.begin(), proof.s_commitment.end());
+    out.insert(out.end(), proof.t2.begin(), proof.t2.end());
+    out.insert(out.end(), proof.proof.begin(), proof.proof.end());
+    return out;
+}
+
+Result<ExperimentalNonceBatchBpppProof> ExperimentalNonceBatchBpppProof::deserialize(
+    std::span<const unsigned char> bytes) {
+    constexpr std::size_t header_size = 9;
+    constexpr std::size_t outer_size = 33 + 33 + 32;
+    if (bytes.size() < header_size || bytes[0] != kSerializationVersion) {
+        return unexpected_error(ErrorCode::InvalidFixedSize, "nonce_batch_bppp:header");
+    }
+    const auto read_u32 = [&bytes](std::size_t offset) {
+        std::uint32_t value = 0;
+        for (unsigned int i = 0; i < 4; ++i) value |= std::uint32_t{bytes[offset + i]} << (8 * i);
+        return value;
+    };
+    const std::size_t count = read_u32(1);
+    const std::size_t proof_size = read_u32(5);
+    if (count == 0 || count > kMaxOutputs || proof_size == 0 || proof_size > kMaxProofBytes ||
+        bytes.size() != header_size + count * 33 + outer_size + proof_size) {
+        return unexpected_error(ErrorCode::InvalidFixedSize, "nonce_batch_bppp:frame_size");
+    }
+    ExperimentalNonceBatchBpppProof out;
+    out.outputs.resize(count);
+    std::size_t offset = header_size;
+    for (auto& point : out.outputs) {
+        std::copy_n(bytes.begin() + offset, point.size(), point.begin());
+        offset += point.size();
+    }
+    std::copy_n(bytes.begin() + offset, out.proof.a_commitment.size(), out.proof.a_commitment.begin());
+    offset += out.proof.a_commitment.size();
+    std::copy_n(bytes.begin() + offset, out.proof.s_commitment.size(), out.proof.s_commitment.begin());
+    offset += out.proof.s_commitment.size();
+    std::copy_n(bytes.begin() + offset, out.proof.t2.size(), out.proof.t2.begin());
+    offset += out.proof.t2.size();
+    out.proof.proof.assign(bytes.begin() + offset, bytes.end());
+    return out;
+}
+
+Result<ExperimentalNonceBatchBpppProof> prove_experimental_nonce_batch_bppp(
+    std::span<const NonceBatchGroup> groups,
+    std::span<const std::vector<BulletproofAssignmentData>> assignments,
+    const bppp::ScalarBytes& nonce, purify_secp_context* secp_context,
+    std::span<const unsigned char> statement_binding, bppp::ExperimentalCircuitBackend* cache) {
+    if (groups.empty() || groups.size() > ExperimentalNonceBatchBpppProof::kMaxOutputs) {
+        return unexpected_error(ErrorCode::InvalidDimensions, "nonce_batch_bppp:groups");
+    }
+    if (groups.size() != assignments.size()) {
+        return unexpected_error(ErrorCode::SizeMismatch, "nonce_batch_bppp:assignments");
+    }
+    PURIFY_RETURN_IF_ERROR(require_secp_context(secp_context, "nonce_batch_bppp:context"),
+                           "nonce_batch_bppp:context");
+    PURIFY_ASSIGN_OR_RETURN(auto circuit, nonce_batch_circuit(groups), "nonce_batch_bppp:circuit");
+    PURIFY_ASSIGN_OR_RETURN(auto assignment, nonce_batch_assignments(groups, assignments), "nonce_batch_bppp:assignment");
+    ExperimentalNonceBatchBpppProof out;
+    out.outputs.reserve(assignment.commitments.size());
+    const auto generator = bppp::base_generator(secp_context);
+    const bppp::ScalarBytes zero{};
+    for (const auto& value : assignment.commitments) {
+        PURIFY_ASSIGN_OR_RETURN(auto point,
+            bppp::pedersen_commit_char(zero, bppp::scalar_bytes(value), secp_context, generator, generator),
+            "nonce_batch_bppp:output");
+        out.outputs.push_back(point);
+    }
+    PURIFY_ASSIGN_OR_RETURN(out.proof,
+        bppp::prove_experimental_circuit_zk_norm_arg_with_public_commitments(
+            circuit, assignment, nonce, out.outputs, secp_context, statement_binding, cache),
+        "nonce_batch_bppp:prove");
+    if (out.proof.proof.size() > ExperimentalNonceBatchBpppProof::kMaxProofBytes) {
+        return unexpected_error(ErrorCode::UnexpectedSize, "nonce_batch_bppp:proof_size");
+    }
+    return out;
+}
+
+Result<bool> verify_experimental_nonce_batch_bppp(
+    std::span<const NonceBatchGroup> groups, const ExperimentalNonceBatchBpppProof& proof,
+    purify_secp_context* secp_context, std::span<const unsigned char> statement_binding,
+    bppp::ExperimentalCircuitBackend* cache) {
+    if (groups.empty() || groups.size() > ExperimentalNonceBatchBpppProof::kMaxOutputs ||
+        proof.outputs.size() != groups.size() || proof.proof.proof.empty() ||
+        proof.proof.proof.size() > ExperimentalNonceBatchBpppProof::kMaxProofBytes) {
+        return unexpected_error(ErrorCode::InvalidDimensions, "nonce_batch_bppp:proof_shape");
+    }
+    PURIFY_RETURN_IF_ERROR(require_secp_context(secp_context, "nonce_batch_bppp:context"),
+                           "nonce_batch_bppp:context");
+    PURIFY_ASSIGN_OR_RETURN(auto circuit, nonce_batch_circuit(groups), "nonce_batch_bppp:circuit");
+    return bppp::verify_experimental_circuit_zk_norm_arg_with_public_commitments(
+        circuit, proof.proof, proof.outputs, secp_context, statement_binding, cache);
 }
 
 } // namespace purify
