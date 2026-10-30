@@ -68,6 +68,33 @@ void test_batch_relation(TestContext& ctx) {
                "each batch output equals only its own coalition/topic sum");
     ctx.expect(circuit->evaluate(*assignment), "multi-topic multi-coalition witness satisfies relation");
 
+    // A singleton host in each group represents independent statements rather
+    // than a sum of several hosts under one statement.
+    std::array<purify::NonceBatchGroup, 2> individual_groups{{
+        {fixture.groups[0].evaluation_input, {fixture.groups[0].hosts[0]}},
+        {fixture.groups[1].evaluation_input, {fixture.groups[1].hosts[1]}},
+    }};
+    std::array<std::vector<purify::BulletproofAssignmentData>, 2> individual_assignments{{
+        {fixture.assignments[0][0]},
+        {fixture.assignments[1][1]},
+    }};
+    auto individual_circuit = purify::nonce_batch_circuit(individual_groups);
+    auto individual_assignment = purify::nonce_batch_assignments(individual_groups, individual_assignments);
+    expect_ok(ctx, individual_circuit, "independent-statement circuit builds");
+    expect_ok(ctx, individual_assignment, "independent-statement witnesses compose");
+    if (individual_circuit.has_value() && individual_assignment.has_value()) {
+        const std::vector<purify::FieldElement> expected_outputs{
+            fixture.assignments[0][0].commitments[0],
+            fixture.assignments[1][1].commitments[0],
+        };
+        ctx.expect(individual_circuit->n_commitments == individual_groups.size(),
+                   "independent statements retain one output each");
+        ctx.expect(individual_assignment->commitments == expected_outputs,
+                   "independent outputs retain statement order");
+        ctx.expect(individual_circuit->evaluate(*individual_assignment),
+                   "independent witnesses satisfy the combined circuit");
+    }
+
     auto changed = *assignment;
     changed.commitments[0] = changed.commitments[0] + purify::FieldElement::one();
     changed.commitments[1] = changed.commitments[1] - purify::FieldElement::one();

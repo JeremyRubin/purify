@@ -29,7 +29,9 @@ struct NonceBatchGroup {
  *
  * Group and host order are retained. Each group uses the existing summed-host
  * relation, including its padding; the combined circuit is padded once more
- * to a power of two. No witnesses or completed proofs are needed here.
+ * to a power of two. To combine independent statements, supply one host per
+ * group; each statement retains its own output in group order. No witnesses
+ * or completed proofs are needed here.
  * This builds a relation, not a public compression of completed group proofs.
  */
 Result<NativeBulletproofCircuit> nonce_batch_circuit(
