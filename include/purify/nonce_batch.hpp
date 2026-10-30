@@ -78,7 +78,9 @@ struct ExperimentalNonceBatchBpppProof {
  * @brief Centrally build one experimental BP++ proof for the ordered groups.
  *
  * The caller supplies every member's witness assignment. Each output is
- * represented by its compressed secp256k1 point in group order.
+ * represented by its compressed secp256k1 point in group order. Outputs
+ * must be finite points; the point at infinity cannot be represented.
+ * The caller must use fresh, unique prover randomness for each proof.
  */
 Result<ExperimentalNonceBatchBpppProof> prove_experimental_nonce_batch_bppp(
     std::span<const NonceBatchGroup> groups,

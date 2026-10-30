@@ -125,6 +125,23 @@ void test_batch_relation(TestContext& ctx) {
                         individual_groups, reversed_outputs, secp.get(), binding);
                     ctx.expect(!reversed_result.has_value() || !*reversed_result,
                                "ordered batch outputs cannot be exchanged");
+                    auto wrong_binding = binding;
+                    wrong_binding.push_back(1);
+                    auto wrong_binding_result = purify::verify_experimental_nonce_batch_bppp(
+                        individual_groups, *decoded, secp.get(), wrong_binding);
+                    ctx.expect(!wrong_binding_result.has_value() || !*wrong_binding_result,
+                               "batch verification rejects a different statement binding");
+                    auto changed_groups = individual_groups;
+                    changed_groups[0].evaluation_input.push_back(1);
+                    auto changed_group_result = purify::verify_experimental_nonce_batch_bppp(
+                        changed_groups, *decoded, secp.get(), binding);
+                    ctx.expect(!changed_group_result.has_value() || !*changed_group_result,
+                               "batch verification rejects a different public statement");
+                    auto missing_output = *decoded;
+                    missing_output.outputs.pop_back();
+                    ctx.expect(!purify::verify_experimental_nonce_batch_bppp(
+                        individual_groups, missing_output, secp.get(), binding).has_value(),
+                        "batch verification rejects a missing public output");
                 }
                 auto truncated = *encoded;
                 truncated.pop_back();
@@ -138,6 +155,23 @@ void test_batch_relation(TestContext& ctx) {
                 wrong_version[0]++;
                 ctx.expect(!purify::ExperimentalNonceBatchBpppProof::deserialize(wrong_version).has_value(),
                            "unknown batch artifact version rejects");
+                auto wrong_count = *encoded;
+                wrong_count[1]++;
+                ctx.expect(!purify::ExperimentalNonceBatchBpppProof::deserialize(wrong_count).has_value(),
+                           "batch frame rejects a mismatched output count");
+                auto wrong_length = *encoded;
+                wrong_length[5] ^= 1;
+                ctx.expect(!purify::ExperimentalNonceBatchBpppProof::deserialize(wrong_length).has_value(),
+                           "batch frame rejects a mismatched proof length");
+                auto excessive_count = *encoded;
+                excessive_count[1] = 0xff;
+                excessive_count[2] = 0xff;
+                ctx.expect(!purify::ExperimentalNonceBatchBpppProof::deserialize(excessive_count).has_value(),
+                           "batch frame rejects counts above the format bound");
+                auto excessive_proof = *encoded;
+                std::fill_n(excessive_proof.begin() + 5, 4, 0xff);
+                ctx.expect(!purify::ExperimentalNonceBatchBpppProof::deserialize(excessive_proof).has_value(),
+                           "batch frame rejects proof lengths above the format bound");
             }
         }
     }
