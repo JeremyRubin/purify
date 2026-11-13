@@ -1,16 +1,32 @@
 {
-  "schema": "purify-construction-parent-release-v1",
+  "schema": "purify-construction-parent-release-v2",
   "protocol": "purify-construction-parent-v1",
-  "status": "accepted",
+  "status": "pending_prover_release_gate",
   "transcript_hash": "sha256",
-  "artifact": {
-    "filename": "sha256-parent-verifier.nvk.zst",
-    "encoded_bytes": 693708278,
-    "decoded_bytes": 3206736424,
-    "sha256": "ba8c69e6fb2fc34105898486df7917fdc35889baa092e48baffb885c8071ee21",
-    "tagged_sha256": {
-      "tag": "Purify/Accountable/DirectNovaVerifierArtifact/v2",
-      "digest": "184c3340de8f005a6e3a83997e90ff993d245026d6aec04804dcb736f29ca0aa"
+  "artifacts": {
+    "verifier": {
+      "filename": "sha256-parent-verifier.nvk.zst",
+      "format_magic": "Purify/Nova/VK2\u0000",
+      "format_version": 2,
+      "encoded_bytes": 693708278,
+      "decoded_bytes": 3206736424,
+      "sha256": "ba8c69e6fb2fc34105898486df7917fdc35889baa092e48baffb885c8071ee21",
+      "tagged_sha256": {
+        "tag": "Purify/Accountable/DirectNovaVerifierArtifact/v2",
+        "digest": "184c3340de8f005a6e3a83997e90ff993d245026d6aec04804dcb736f29ca0aa"
+      }
+    },
+    "prover": {
+      "filename": "sha256-parent-prover.pk1.zst",
+      "format_magic": "Purify/Nova/PK1\u0000",
+      "format_version": 1,
+      "encoded_bytes": 693582375,
+      "decoded_bytes": 3022457782,
+      "sha256": "cd4bece27897e8634e837a4acb85ed091f2175df62d8c38e65497ef07066f816",
+      "tagged_sha256": {
+        "tag": "Purify/Accountable/DirectNovaProverArtifact/v1",
+        "digest": "37b31a1cea0012cad3b5342deb2c2df85d6b0e43ce913eb80e4dff6af359223b"
+      }
     }
   },
   "suite": {
@@ -32,10 +48,28 @@
     "proof_sequences": 152
   },
   "source": {
-    "purify_qualification_commit": "0f5e900155d6c08876c34a5acb3c8f54a0daee25",
-    "purify_profile_commit": "42b7d4b4895dc77019a8f98e13a5a660f5791e0a",
+    "purify_source_tree": null,
     "nova_repository": "https://github.com/JeremyRubin/Nova",
     "nova_commit": "aa42229024dc141e4edff89fcaa79f345e156d46"
+  },
+  "prover_release_gate": {
+    "status": "pending",
+    "fresh_proof": {
+      "bytes": 15076,
+      "sha256": null
+    },
+    "timings_seconds": {
+      "setup": null,
+      "prover_artifact_write": null,
+      "prover_artifact_reload": null,
+      "proving": null,
+      "recursive_verification": null,
+      "total": null
+    },
+    "peak_resident_bytes": null,
+    "exact_final_state_verified": null,
+    "cpp_native_decision_passed": null,
+    "packaged_cli_passed": null
   },
   "qualification_vectors": {
     "status": "qualified",
