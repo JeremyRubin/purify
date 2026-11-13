@@ -457,7 +457,7 @@ void run_slashability_tests(TestContext& ctx, bool verify_parent) {
     }
     auto missing_setup =
         purify::accountable::
-            serialize_accepted_construction_parent_wit3(
+            serialize_accepted_construction_parent_witness(
                 construction->setup, coalition->distributed_setup,
                 construction->payload,
                 construction->resolved_entries,
@@ -471,7 +471,7 @@ void run_slashability_tests(TestContext& ctx, bool verify_parent) {
     std::reverse(reordered_setup.begin(), reordered_setup.end());
     auto reordered =
         purify::accountable::
-            serialize_accepted_construction_parent_wit3(
+            serialize_accepted_construction_parent_witness(
                 construction->setup, coalition->distributed_setup,
                 construction->payload,
                 construction->resolved_entries, reordered_setup,

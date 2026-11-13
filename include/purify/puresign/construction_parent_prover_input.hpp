@@ -39,11 +39,11 @@ struct ConstructionParentAnchorWitness {
  * bytes are returned. The caller cannot supply descriptors, precommitments,
  * public witness points, or a final root independently.
  *
- * The returned Wit3 frame contains no coalition, member, nonce-host, anchor,
- * or punishment secret. It is nevertheless bound to the verified distributed
+ * The returned witness contains no coalition, member, nonce-host, anchor, or
+ * punishment secret. It is nevertheless bound to the verified distributed
  * setup capability required to prepare the anchor leaves.
  */
-[[nodiscard]] Result<Bytes> serialize_accepted_construction_parent_wit3(
+[[nodiscard]] Result<Bytes> serialize_accepted_construction_parent_witness(
     const ResolvedConstructionSetup& resolved_setup,
     const VerifiedDistributedRecoverySetup& verified_setup,
     const ConstructionReceiptPayload& payload,

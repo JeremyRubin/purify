@@ -729,7 +729,7 @@ Result<purify::Bytes> serialize_parent_prover_fixture(
             {anchor.record, anchor.reduction, anchor.parent_step});
     }
     return purify::accountable::
-        serialize_accepted_construction_parent_wit3(
+        serialize_accepted_construction_parent_witness(
             fixture.setup, verified_setup,
             fixture.payload, fixture.resolved_entries,
             setup_witnesses, anchor_witnesses,
@@ -946,7 +946,7 @@ serialize_nondeciding_parent_prover_fixture(
             {*witness.record, *witness.reduction, *witness.step});
     }
     auto production = purify::accountable::
-        serialize_accepted_construction_parent_wit3(
+        serialize_accepted_construction_parent_witness(
             fixture.setup, coalition.distributed_setup,
             fixture.payload, fixture.resolved_entries,
             setup_witnesses, anchor_witnesses,

@@ -102,7 +102,7 @@ std::span<const unsigned char> descriptor_at(
 
 } // namespace
 
-Result<Bytes> serialize_accepted_construction_parent_wit3(
+Result<Bytes> serialize_accepted_construction_parent_witness(
     const ResolvedConstructionSetup& resolved_setup,
     const VerifiedDistributedRecoverySetup& verified_setup,
     const ConstructionReceiptPayload& payload,
