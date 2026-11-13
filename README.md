@@ -113,10 +113,20 @@ ctest --test-dir build-parent --output-on-failure \
   -R '^(purify.tests.slashability_e2e|purify.tests.installed_package|purify.tests.private_construction_parent_symbols)$'
 ```
 
-`prove_qualified_construction_parent` binds a complete Wit3 input before it
-opens either artifact, snapshots and authenticates both exact artifacts,
-consumes PK1 for folding, and independently verifies the resulting state with
-VK2. A standalone proving CLI is not packaged yet.
+The `prover` feature also builds a purpose-specific command:
+
+```sh
+cargo run --manifest-path rust/construction-parent/Cargo.toml --release \
+  --features prover --bin purify-construction-parent-prover -- \
+  /path/to/sha256-parent-prover.pk1.zst \
+  /path/to/sha256-parent-verifier.nvk.zst \
+  /path/to/construction.wit3 /new/path/construction.proof
+```
+
+It binds the complete size-limited Wit3 input before opening either artifact,
+snapshots and authenticates both exact artifacts, consumes PK1 for folding,
+and independently verifies the resulting state with VK2. CMake installation
+of this command remains a separate packaging step.
 
 `ConstructionParentVerifier` verifies the recursive proof and completes the
 native accumulation decision before returning a verified receipt. This
