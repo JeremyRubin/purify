@@ -85,11 +85,12 @@ applications use `ConstructionParentVerifier` from the C++ library.
 
 The release manifest pins separate verifier (`VK2`) and prover (`PK1`)
 artifacts by exact length and tagged SHA-256 digest. The verifier backend
-accepts only the selected VK2 identity. The opt-in Rust `prover` feature
-accepts only the selected PK1 and VK2 identities and exposes a checked
-one-shot proving API. Both artifacts contain transparent public setup
-material and remain external deployment resources. Do not deploy a manifest
-whose release status is not `accepted`.
+accepts only the selected VK2 identity; the purpose-specific prover accepts
+only the selected PK1 and VK2 identities. Stale centralized artifacts remain
+rejected. Both artifacts contain transparent public setup material and remain
+external deployment resources rather than files embedded in the library,
+prover executable, or repository. Do not deploy a manifest whose release
+status is not `accepted`.
 
 The ordinary CI job builds and tests the Rust, package, codec, and private
 symbol boundaries without downloading these artifacts. It does not claim
@@ -113,20 +114,48 @@ ctest --test-dir build-parent --output-on-failure \
   -R '^(purify.tests.slashability_e2e|purify.tests.installed_package|purify.tests.private_construction_parent_symbols)$'
 ```
 
-The `prover` feature also builds a purpose-specific command:
+Build the standalone purpose-specific prover separately:
 
 ```sh
-cargo run --manifest-path rust/construction-parent/Cargo.toml --release \
-  --features prover --bin purify-construction-parent-prover -- \
-  /path/to/sha256-parent-prover.pk1.zst \
-  /path/to/sha256-parent-verifier.nvk.zst \
-  /path/to/construction.wit3 /new/path/construction.proof
+cmake -S . -B build-prover \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DPURIFY_BUILD_CONSTRUCTION_PARENT_PROVER=ON \
+  -DPURIFY_BUILD_CONSTRUCTION_PARENT_VERIFIER=OFF \
+  -DPURIFY_BUILD_TESTS=OFF \
+  -DPURIFY_BUILD_CLI=OFF \
+  -DPURIFY_BUILD_BENCH=OFF \
+  -DPURIFY_BUILD_DOCS=OFF \
+  -DPURIFY_BUILD_FUZZ=OFF
+CARGO_BUILD_JOBS=1 cmake --build build-prover \
+  --target purify_construction_parent_prover
+cmake --install build-prover --prefix /opt/purify \
+  --component construction_parent_prover
 ```
 
-It binds the complete size-limited Wit3 input before opening either artifact,
-snapshots and authenticates both exact artifacts, consumes PK1 for folding,
-and independently verifies the resulting state with VK2. CMake installation
-of this command remains a separate packaging step.
+The prover target has its own Cargo target directory and is opt-in. Enabling
+it does not add proving code to the verifier backend or ordinary Purify
+library. It is supported only on 64-bit macOS and Linux, and one build emits
+one target architecture.
+
+Produce one proof from a canonical Wit3 frame. Production callers obtain that
+frame from the accepted-only C++ formatter; the prover itself checks the
+qualified recursive relation and leaves native acceptance to the verifier:
+
+```sh
+/opt/purify/bin/purify-construction-parent-prover \
+  /path/to/sha256-parent-prover.pk1.zst \
+  /path/to/sha256-parent-verifier.nvk.zst \
+  /path/to/construction.wit3 \
+  /new/path/construction.proof
+```
+
+The output path must not exist. The prover checks and binds the complete Wit3
+input before opening either artifact, snapshots and authenticates both exact
+artifacts, consumes PK1 for folding, independently verifies the resulting
+state with VK2, and writes one synced 15,076-byte proof. Producing that proof
+is not receipt acceptance: the proof must still pass
+`ConstructionParentVerifier`, including the native final accumulation
+decision, before an application acts on the receipt.
 
 `ConstructionParentVerifier` verifies the recursive proof and completes the
 native accumulation decision before returning a verified receipt. This
