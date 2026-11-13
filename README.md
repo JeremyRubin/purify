@@ -83,16 +83,16 @@ exact size is platform-dependent. It exports only the three private load,
 verify, and destroy ABI entry points. The private ABI header is not installed;
 applications use `ConstructionParentVerifier` from the C++ library.
 
-The mixed distributed-setup profile is qualified. Its loader accepts only the
-exact external artifact length, suite, and tagged digest recorded in
-`release/construction-parent-sha256.json`; stale centralized artifacts remain
-rejected. The installed Rust backend contains only the verifier. Transparent
-setup, qualification proving, and artifact writing compile only into tests.
-The qualified artifact remains an external deployment resource rather than a
-file embedded in the library or repository.
+The release manifest pins separate verifier (`VK2`) and prover (`PK1`)
+artifacts by exact length and tagged SHA-256 digest. The verifier backend
+accepts only the selected VK2 identity. The opt-in Rust `prover` feature
+accepts only the selected PK1 and VK2 identities and exposes a checked
+one-shot proving API. Both artifacts contain transparent public setup
+material and remain external deployment resources. Do not deploy a manifest
+whose release status is not `accepted`.
 
 The ordinary CI job builds and tests the Rust, package, codec, and private
-symbol boundaries without downloading this artifact. It does not claim
+symbol boundaries without downloading these artifacts. It does not claim
 recursive proof acceptance. Artifact-backed acceptance remains the explicit
 release gate.
 
@@ -113,15 +113,16 @@ ctest --test-dir build-parent --output-on-failure \
   -R '^(purify.tests.slashability_e2e|purify.tests.installed_package|purify.tests.private_construction_parent_symbols)$'
 ```
 
-This release profile does not yet provide a reusable production prover
-artifact or standalone proving CLI. The qualified proving path is a
-resource-gated test operation; packaging authenticated reusable prover state
-is a separate follow-up from deploying the verifier above.
+`prove_qualified_construction_parent` binds a complete Wit3 input before it
+opens either artifact, snapshots and authenticates both exact artifacts,
+consumes PK1 for folding, and independently verifies the resulting state with
+VK2. A standalone proving CLI is not packaged yet.
 
-This verifies a construction proof and completes the native accumulation
-decision before returning a verified receipt. Library verification does not
-activate consensus, authorize enrollment, or resolve the documented child
-proof, custody, confidentiality, and scaling requirements.
+`ConstructionParentVerifier` verifies the recursive proof and completes the
+native accumulation decision before returning a verified receipt. This
+library acceptance does not activate consensus, authorize enrollment, or
+resolve the documented child-proof, custody, confidentiality, and scaling
+requirements.
 
 ### Using as a submodule
 
