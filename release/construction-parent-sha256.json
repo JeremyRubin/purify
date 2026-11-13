@@ -48,7 +48,9 @@
     "proof_sequences": 152
   },
   "source": {
-    "qualification_source_tree": null,
+    "qualification_tag": "construction-parent-sha256-pk1-v1-provenance",
+    "qualification_commit": "f85123925ae32f3d2ee0ec13b5a8d553037b2c99",
+    "qualification_source_tree": "814b38bfbcc09f1c45e769135af81253d7e3280b",
     "nova_repository": "https://github.com/JeremyRubin/Nova",
     "nova_commit": "aa42229024dc141e4edff89fcaa79f345e156d46"
   },
