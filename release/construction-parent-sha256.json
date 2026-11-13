@@ -48,28 +48,41 @@
     "proof_sequences": 152
   },
   "source": {
-    "purify_source_tree": null,
+    "qualification_source_tree": null,
     "nova_repository": "https://github.com/JeremyRubin/Nova",
     "nova_commit": "aa42229024dc141e4edff89fcaa79f345e156d46"
   },
   "prover_release_gate": {
     "status": "pending",
-    "fresh_proof": {
-      "bytes": 15076,
-      "sha256": null
+    "setup_qualification": {
+      "proof": {
+        "bytes": 15076,
+        "sha256": null
+      },
+      "timings_seconds": {
+        "setup": null,
+        "prover_artifact_write": null,
+        "prover_artifact_reload": null,
+        "proving": null,
+        "recursive_verification": null,
+        "total": null
+      },
+      "peak_resident_bytes": null,
+      "exact_final_state_verified": null
     },
-    "timings_seconds": {
-      "setup": null,
-      "prover_artifact_write": null,
-      "prover_artifact_reload": null,
-      "proving": null,
-      "recursive_verification": null,
-      "total": null
-    },
-    "peak_resident_bytes": null,
-    "exact_final_state_verified": null,
-    "cpp_native_decision_passed": null,
-    "packaged_cli_passed": null
+    "packaged_cli": {
+      "proof": {
+        "bytes": 15076,
+        "sha256": null
+      },
+      "elapsed_seconds": null,
+      "peak_resident_bytes": null,
+      "exact_final_state_verified": null,
+      "cpp_native_decision": {
+        "proof_sha256": null,
+        "passed": null
+      }
+    }
   },
   "qualification_vectors": {
     "status": "qualified",
