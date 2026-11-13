@@ -23,6 +23,13 @@ five recursive steps. The prover CLI bounds Wit4 to 200 total leaves and a
 at 100 each before this boundary. This qualification does not claim a
 200-step performance measurement.
 
+Reusable setup was qualified from the tagged predecessor's strict Wit3
+fixture. Production accepts Wit4 only. Wit4 removes the already
+descriptor-and-statement-bound 66-byte setup prefix and 96-byte anchor prefix
+from each record. Exact projection checks covered descriptors, public points,
+transcript inputs, proof reductions, ordered steps, and final roots. The Nova
+relation, PK1, VK2, and 15,076-byte proof format are unchanged.
+
 | Vector | SHA256 |
 | --- | --- |
 | Accepted Wit4 | `77b7331e92a538ebd1bfe90480166b298196ff4dd9a3d8f7557c202a3bab3418` |
@@ -34,6 +41,14 @@ The 693,708,278-byte VK2 verifier artifact and 693,582,375-byte PK1 prover
 artifact remain external. Their authenticated identities and all vector
 hashes are recorded in
 [`release/construction-parent-sha256.json`](../../release/construction-parent-sha256.json).
+
+The final gate produced distinct randomized setup and installed-CLI proofs.
+Both passed recursive verification, exact-state checking, the C++ receipt
+boundary, and native accumulation decision. The installed CLI completed in
+6,749.73 seconds with 4,722,769,920-byte maximum RSS and an
+8,447,794,208-byte peak footprint. Setup completed successfully, but the
+sandbox denied its extended `/usr/bin/time -l` metrics after the test passed;
+the manifest therefore records setup memory as unavailable rather than zero.
 
 Full vector requalification is an explicit native-resource release operation.
 Every output path must not exist before running:
