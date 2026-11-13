@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <cstdint>
 #include <vector>
 
@@ -16,21 +17,42 @@
 namespace purify::accountable {
 namespace {
 
-constexpr std::array<unsigned char, 16> kWit3Magic{
+constexpr std::array<unsigned char, 16> kWit4Magic{
     'P', 'u', 'r', 'i', 'f', 'y', '/', 'N',
-    'o', 'v', 'a', '/', 'W', 'i', 't', '3'};
+    'o', 'v', 'a', '/', 'W', 'i', 't', '4'};
 constexpr std::size_t kDescriptorSize =
     detail::kConstructionParentDescriptorSize;
 constexpr std::size_t kReductionProofSize = 1'022;
 constexpr std::size_t kStepProofSize = 1'056;
 constexpr std::size_t kHeaderSize =
-    kWit3Magic.size() + 32 + 32 + 64 + 4 + 4;
+    kWit4Magic.size() + 32 + 32 + 64 + 4 + 4;
+constexpr std::size_t kSetupTranscriptOffset =
+    1 + RecoveryRootShare::kSerializedSize;
+constexpr std::size_t kAnchorTranscriptOffset =
+    1 + AnchorEscrowCiphertext::kSerializedSize;
+constexpr std::size_t kSetupRecordSize =
+    1 + RecoveryRootContribution::kProofSerializedSize;
+constexpr std::size_t kAnchorRecordSize =
+    1 + AnchorEscrowRecord::kProofPayloadSize;
 constexpr std::size_t kSetupWitnessSize =
-    kDescriptorSize + 33 + RecoveryRootContribution::kSerializedSize +
+    kDescriptorSize + 33 + kSetupRecordSize +
     kReductionProofSize + kStepProofSize;
 constexpr std::size_t kAnchorWitnessSize =
-    kDescriptorSize + 33 + AnchorEscrowRecord::kSerializedSize +
+    kDescriptorSize + 33 + kAnchorRecordSize +
     kReductionProofSize + kStepProofSize;
+
+static_assert(kSetupTranscriptOffset == 67);
+static_assert(kAnchorTranscriptOffset == 97);
+static_assert(kSetupRecordSize == 1'137);
+static_assert(kAnchorRecordSize == kSetupRecordSize);
+static_assert(kSetupWitnessSize == 3'378);
+static_assert(kAnchorWitnessSize == kSetupWitnessSize);
+static_assert(kSetupRecordSize ==
+              1 + RecoveryRootContribution::kSerializedSize -
+                  kSetupTranscriptOffset);
+static_assert(kAnchorRecordSize ==
+              1 + AnchorEscrowRecord::kSerializedSize -
+                  kAnchorTranscriptOffset);
 
 template <std::size_t N>
 void append(Bytes& output, const std::array<unsigned char, N>& bytes) {
@@ -39,6 +61,15 @@ void append(Bytes& output, const std::array<unsigned char, N>& bytes) {
 
 void append(Bytes& output, std::span<const unsigned char> bytes) {
     output.insert(output.end(), bytes.begin(), bytes.end());
+}
+
+void append_compact_record(Bytes& output,
+                           std::span<const unsigned char> full_record,
+                           std::size_t transcript_offset) {
+    assert(!full_record.empty());
+    assert(transcript_offset <= full_record.size());
+    output.push_back(full_record.front());
+    append(output, full_record.subspan(transcript_offset));
 }
 
 void append_u32_be(Bytes& output, std::uint32_t value) {
@@ -74,7 +105,7 @@ Result<bppp::PointBytes> effective_member_point(
     purify_secp_context* secp_context) {
     if (member_index >= roster.members().size()) {
         return unexpected_error(ErrorCode::IndexOutOfRange,
-                                "construction_wit3:member_index");
+                                "construction_parent_witness:member_index");
     }
     const auto& member = roster.members()[member_index];
     const auto coefficient = member.coefficient.to_bytes_be();
@@ -82,7 +113,7 @@ Result<bppp::PointBytes> effective_member_point(
     if (purify_point_scale(secp_context, member.public_key.data(),
                            coefficient.data(), weighted.data()) == 0) {
         return unexpected_error(ErrorCode::BackendRejectedInput,
-                                "construction_wit3:weighted_member");
+                                "construction_parent_witness:weighted_member");
     }
     return weighted;
 }
@@ -113,21 +144,22 @@ Result<Bytes> serialize_accepted_construction_parent_witness(
     purify_secp_context* secp_context,
     bppp::ExperimentalCircuitBackend* cache) {
     PURIFY_RETURN_IF_ERROR(
-        require_secp_context(secp_context, "construction_wit3:context"),
-        "construction_wit3:context");
+        require_secp_context(secp_context,
+                             "construction_parent_witness:context"),
+        "construction_parent_witness:context");
     PURIFY_ASSIGN_OR_RETURN(
         auto inputs,
         detail::resolve_construction_parent_public_inputs(
             resolved_setup, payload, resolved_entries,
             accumulator.leaves(), secp_context),
-        "construction_wit3:public_inputs");
+        "construction_parent_witness:public_inputs");
 
     const auto setup_entries = payload.setup_entries();
     const auto anchor_entries = payload.anchor_entries();
     if (setup_witnesses.size() != setup_entries.size() ||
         anchor_witnesses.size() != anchor_entries.size()) {
         return unexpected_error(ErrorCode::SizeMismatch,
-                                "construction_wit3:witness_count");
+                                "construction_parent_witness:witness_count");
     }
     if (verified_setup.roster().recovery_root() !=
             resolved_setup.recovery_root() ||
@@ -136,7 +168,7 @@ Result<Bytes> serialize_accepted_construction_parent_witness(
         !same_roster(verified_setup.roster(),
                      resolved_setup.roster())) {
         return unexpected_error(ErrorCode::BindingMismatch,
-                                "construction_wit3:verified_setup");
+                                "construction_parent_witness:verified_setup");
     }
 
     std::size_t setup_size = 0;
@@ -154,7 +186,7 @@ Result<Bytes> serialize_accepted_construction_parent_witness(
         !checked_add_size(expected_size, kFinalRootSize,
                           expected_size)) {
         return unexpected_error(ErrorCode::Overflow,
-                                "construction_wit3:encoded_size");
+                                "construction_parent_witness:encoded_size");
     }
 
     std::array<unsigned char, kFinalRootSize> empty_root{};
@@ -162,7 +194,7 @@ Result<Bytes> serialize_accepted_construction_parent_witness(
         auto current,
         bppp::accumulation::parse_root_claim(
             accumulator.leaves().basis(), empty_root, secp_context),
-        "construction_wit3:empty_root");
+        "construction_parent_witness:empty_root");
 
     for (std::size_t index = 0; index < setup_witnesses.size(); ++index) {
         const auto& witness = setup_witnesses[index];
@@ -170,33 +202,33 @@ Result<Bytes> serialize_accepted_construction_parent_witness(
         if (witness.contribution.share().serialize() !=
             entry.share.serialize()) {
             return unexpected_error(ErrorCode::BindingMismatch,
-                                    "construction_wit3:setup_share");
+                                    "construction_parent_witness:setup_share");
         }
         PURIFY_ASSIGN_OR_RETURN(
             auto prepared,
             accumulator.leaves().prepare(
                 resolved_setup.roster(), resolved_setup.formation(),
                 index, witness.contribution, secp_context, cache),
-            "construction_wit3:prepare_setup");
+            "construction_parent_witness:prepare_setup");
         if (prepared.circuit_precommitment() !=
             entry.circuit_precommitment) {
             return unexpected_error(
                 ErrorCode::BindingMismatch,
-                "construction_wit3:setup_precommitment");
+                "construction_parent_witness:setup_precommitment");
         }
         PURIFY_ASSIGN_OR_RETURN(
             auto leaf,
             bppp::accumulation::verify_algebraic_norm_reduction(
                 accumulator.leaves().basis(), prepared.norm(),
                 witness.reduction, secp_context),
-            "construction_wit3:verify_setup_reduction");
+            "construction_parent_witness:verify_setup_reduction");
         const std::array claims{current, leaf};
         PURIFY_ASSIGN_OR_RETURN(
             current,
             bppp::accumulation::verify_algebraic_step(
                 accumulator.leaves().basis(), claims, witness.step,
                 secp_context),
-            "construction_wit3:verify_setup_step");
+            "construction_parent_witness:verify_setup_step");
     }
 
     for (std::size_t index = 0; index < anchor_witnesses.size(); ++index) {
@@ -206,7 +238,7 @@ Result<Bytes> serialize_accepted_construction_parent_witness(
         if (!same_ciphertext(witness.record.ciphertext(),
                              entry.ciphertext)) {
             return unexpected_error(ErrorCode::BindingMismatch,
-                                    "construction_wit3:ciphertext");
+                                    "construction_parent_witness:ciphertext");
         }
         PURIFY_ASSIGN_OR_RETURN(
             auto prepared,
@@ -214,36 +246,36 @@ Result<Bytes> serialize_accepted_construction_parent_witness(
                 verified_setup.roster(), resolved.anchor_root,
                 resolved.punishment_key, resolved.context_digest,
                 witness.record, secp_context, cache),
-            "construction_wit3:prepare_anchor");
+            "construction_parent_witness:prepare_anchor");
         if (prepared.circuit_precommitment() !=
             entry.circuit_precommitment) {
             return unexpected_error(
                 ErrorCode::BindingMismatch,
-                "construction_wit3:anchor_precommitment");
+                "construction_parent_witness:anchor_precommitment");
         }
         PURIFY_ASSIGN_OR_RETURN(
             auto leaf,
             bppp::accumulation::verify_algebraic_norm_reduction(
                 accumulator.leaves().basis(), prepared.norm(),
                 witness.reduction, secp_context),
-            "construction_wit3:verify_anchor_reduction");
+            "construction_parent_witness:verify_anchor_reduction");
         const std::array claims{current, leaf};
         PURIFY_ASSIGN_OR_RETURN(
             current,
             bppp::accumulation::verify_algebraic_step(
                 accumulator.leaves().basis(), claims, witness.step,
                 secp_context),
-            "construction_wit3:verify_anchor_step");
+            "construction_parent_witness:verify_anchor_step");
     }
 
     PURIFY_RETURN_IF_ERROR(
         bppp::accumulation::decide(
             accumulator.leaves().basis(), current, secp_context),
-        "construction_wit3:decide");
+        "construction_parent_witness:decide");
 
     Bytes encoded;
     encoded.reserve(expected_size);
-    append(encoded, kWit3Magic);
+    append(encoded, kWit4Magic);
     append(encoded, inputs.statement_digest);
     append(encoded, resolved_setup.resolved_digest().bytes());
     append(encoded, resolved_setup.recovery_root().to_bytes_be());
@@ -256,34 +288,35 @@ Result<Bytes> serialize_accepted_construction_parent_witness(
             auto weighted,
             effective_member_point(resolved_setup.roster(), index,
                                    secp_context),
-            "construction_wit3:effective_member");
+            "construction_parent_witness:effective_member");
         PURIFY_ASSIGN_OR_RETURN(
             auto contribution_bytes,
             witness.contribution.serialize(secp_context),
-            "construction_wit3:serialize_contribution");
+            "construction_parent_witness:serialize_contribution");
         PURIFY_ASSIGN_OR_RETURN(
             auto reduction_bytes,
             bppp::accumulation::serialize_algebraic_norm_reduction(
                 accumulator.leaves().basis(), witness.reduction,
                 secp_context),
-            "construction_wit3:serialize_setup_reduction");
+            "construction_parent_witness:serialize_setup_reduction");
         PURIFY_ASSIGN_OR_RETURN(
             auto step_bytes,
             bppp::accumulation::serialize_algebraic_step(
                 accumulator.leaves().basis(), witness.step,
                 secp_context),
-            "construction_wit3:serialize_setup_step");
+            "construction_parent_witness:serialize_setup_step");
         if (contribution_bytes.size() !=
                 RecoveryRootContribution::kSerializedSize ||
             reduction_bytes.size() != kReductionProofSize ||
             step_bytes.size() != kStepProofSize) {
             return unexpected_error(ErrorCode::InternalMismatch,
-                                    "construction_wit3:setup_size");
+                                    "construction_parent_witness:setup_size");
         }
 
         append(encoded, descriptor_at(inputs, index));
         append(encoded, weighted);
-        append(encoded, contribution_bytes);
+        append_compact_record(encoded, contribution_bytes,
+                              kSetupTranscriptOffset);
         append(encoded, reduction_bytes);
         append(encoded, step_bytes);
     }
@@ -299,30 +332,31 @@ Result<Bytes> serialize_accepted_construction_parent_witness(
         PURIFY_ASSIGN_OR_RETURN(
             auto record_bytes,
             witness.record.serialize(secp_context),
-            "construction_wit3:serialize_anchor_record");
+            "construction_parent_witness:serialize_anchor_record");
         PURIFY_ASSIGN_OR_RETURN(
             auto reduction_bytes,
             bppp::accumulation::serialize_algebraic_norm_reduction(
                 accumulator.leaves().basis(), witness.reduction,
                 secp_context),
-            "construction_wit3:serialize_anchor_reduction");
+            "construction_parent_witness:serialize_anchor_reduction");
         PURIFY_ASSIGN_OR_RETURN(
             auto step_bytes,
             bppp::accumulation::serialize_algebraic_step(
                 accumulator.leaves().basis(), witness.step,
                 secp_context),
-            "construction_wit3:serialize_anchor_step");
+            "construction_parent_witness:serialize_anchor_step");
         if (record_bytes.size() != AnchorEscrowRecord::kSerializedSize ||
             reduction_bytes.size() != kReductionProofSize ||
             step_bytes.size() != kStepProofSize) {
             return unexpected_error(ErrorCode::InternalMismatch,
-                                    "construction_wit3:anchor_size");
+                                    "construction_parent_witness:anchor_size");
         }
 
         append(encoded,
                descriptor_at(inputs, setup_witnesses.size() + index));
         append(encoded, punishment);
-        append(encoded, record_bytes);
+        append_compact_record(encoded, record_bytes,
+                              kAnchorTranscriptOffset);
         append(encoded, reduction_bytes);
         append(encoded, step_bytes);
     }
@@ -331,15 +365,15 @@ Result<Bytes> serialize_accepted_construction_parent_witness(
         auto final_root,
         bppp::accumulation::serialize_root_claim(
             accumulator.leaves().basis(), current, secp_context),
-        "construction_wit3:serialize_root");
+        "construction_parent_witness:serialize_root");
     if (final_root.size() != kFinalRootSize) {
         return unexpected_error(ErrorCode::InternalMismatch,
-                                "construction_wit3:root_size");
+                                "construction_parent_witness:root_size");
     }
     append(encoded, final_root);
     if (encoded.size() != expected_size) {
         return unexpected_error(ErrorCode::InternalMismatch,
-                                "construction_wit3:final_size");
+                                "construction_parent_witness:final_size");
     }
     return encoded;
 }

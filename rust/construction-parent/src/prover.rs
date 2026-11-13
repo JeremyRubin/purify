@@ -1,6 +1,6 @@
 //! Checked construction-parent prover inputs.
 //!
-//! Decoding accepts only the fixed Wit3 framing and canonical native proof
+//! Decoding accepts only the fixed Wit4 framing and canonical native proof
 //! values. Binding is a separate, deliberately expensive boundary: it
 //! executes every production constraint, derives the complete state chain,
 //! and returns an opaque input that later prover APIs can consume.
@@ -30,20 +30,20 @@ use crate::nova_session::{
 };
 use crate::Scalar;
 
-/// Failure while decoding the canonical Wit3 framing or native proof values.
+/// Failure while decoding the canonical Wit4 framing or native proof values.
 #[derive(Debug, Error)]
-#[error("invalid construction parent Wit3 witness: {detail}")]
+#[error("invalid construction parent Wit4 witness: {detail}")]
 pub struct ConstructionParentWitnessDecodeError {
     detail: String,
 }
 
-/// Canonically decoded Wit3 data that has not yet executed the Nova relation.
+/// Canonically decoded Wit4 data that has not yet executed the Nova relation.
 pub struct ConstructionParentWitness {
     fixture: ConstructionParentProverFixture,
 }
 
 impl ConstructionParentWitness {
-    /// Decode and canonically validate one complete Wit3 byte string.
+    /// Decode and canonically validate one complete Wit4 byte string.
     pub fn decode(bytes: &[u8]) -> Result<Self, ConstructionParentWitnessDecodeError> {
         let fixture = ConstructionParentProverFixture::parse(bytes).map_err(|error| {
             ConstructionParentWitnessDecodeError {
@@ -329,7 +329,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn public_decoder_rejects_truncated_wit3() {
+    fn public_decoder_rejects_truncated_wit4() {
         let error = ConstructionParentWitness::decode(&[])
             .err()
             .expect("empty witness rejects");
@@ -339,9 +339,9 @@ mod tests {
     }
 
     #[test]
-    fn public_decoder_accepts_checked_wit3_without_binding() {
+    fn public_decoder_accepts_checked_wit4_without_binding() {
         let witness = ConstructionParentWitness::decode(include_bytes!(
-            "../../../tests/vectors/construction_parent_sha256_accepted.wit3"
+            "../../../tests/vectors/construction_parent_sha256_accepted.wit4"
         ))
         .expect("decode accepted construction parent witness");
         assert_eq!(witness.step_count(), 5);
@@ -378,7 +378,7 @@ mod tests {
     #[ignore = "executes every constraint in five production recurrences"]
     fn public_binder_executes_the_complete_checked_witness() {
         let witness = ConstructionParentWitness::decode(include_bytes!(
-            "../../../tests/vectors/construction_parent_sha256_accepted.wit3"
+            "../../../tests/vectors/construction_parent_sha256_accepted.wit4"
         ))
         .expect("decode accepted construction parent witness");
         let checked = witness.bind().expect("bind accepted witness state chain");

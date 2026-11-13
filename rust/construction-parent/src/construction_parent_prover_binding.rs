@@ -1,4 +1,4 @@
-//! Checked binding from one decoded Wit3 input to ordered Nova steps.
+//! Checked binding from one decoded Wit4 input to ordered Nova steps.
 //!
 //! Parsing establishes canonical encodings. This boundary additionally
 //! executes every production constraint against the supplied witness, checks
@@ -28,7 +28,7 @@ use crate::nova_construction_recurrence::{
 use crate::nova_session::NovaSessionStep;
 use crate::{scalar_to_canonical, RelationError, Scalar};
 
-/// Failure while binding canonical Wit3 data to the qualified relation.
+/// Failure while binding canonical Wit4 data to the qualified relation.
 #[derive(Debug, Eq, Error, PartialEq)]
 pub enum ConstructionParentWitnessBindingError {
     /// A state or relation encoding was malformed.
@@ -76,7 +76,7 @@ pub enum ConstructionParentWitnessBindingError {
     /// The final state does not contain the independently derived manifest.
     #[error("construction parent witness final manifest mismatch")]
     FinalManifest,
-    /// The final state does not encode the root appended to the Wit3 input.
+    /// The final state does not encode the root appended to the Wit4 input.
     #[error("construction parent witness final root mismatch")]
     FinalRoot,
 }
@@ -125,7 +125,7 @@ impl BoundConstructionParentWitness {
 }
 
 impl ConstructionParentProverFixture {
-    /// Consume one canonical Wit3 input and bind its complete state chain.
+    /// Consume one canonical Wit4 input and bind its complete state chain.
     pub(crate) fn bind(
         self,
     ) -> Result<BoundConstructionParentWitness, ConstructionParentWitnessBindingError> {
@@ -395,7 +395,7 @@ mod tests {
 
     fn accepted_fixture() -> ConstructionParentProverFixture {
         ConstructionParentProverFixture::parse(include_bytes!(
-            "../../../tests/vectors/construction_parent_sha256_accepted.wit3"
+            "../../../tests/vectors/construction_parent_sha256_accepted.wit4"
         ))
         .expect("parse accepted construction parent witness")
     }

@@ -39,6 +39,10 @@ struct ConstructionParentAnchorWitness {
  * bytes are returned. The caller cannot supply descriptors, precommitments,
  * public witness points, or a final root independently.
  *
+ * Wit4 validates each complete typed record, then emits its type version and
+ * proof transcript. The share or ciphertext already bound by the descriptor
+ * and construction statement is not repeated in the prover witness.
+ *
  * The returned witness contains no coalition, member, nonce-host, anchor, or
  * punishment secret. It is nevertheless bound to the verified distributed
  * setup capability required to prepare the anchor leaves.

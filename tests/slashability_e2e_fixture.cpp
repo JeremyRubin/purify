@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <cstdint>
 #include <limits>
 #include <span>
@@ -29,18 +30,32 @@ using Point = std::array<unsigned char, 33>;
 
 constexpr std::array<unsigned char, 16> kParentProverFixtureMagic{
     'P', 'u', 'r', 'i', 'f', 'y', '/', 'N',
-    'o', 'v', 'a', '/', 'W', 'i', 't', '3'};
+    'o', 'v', 'a', '/', 'W', 'i', 't', '4'};
 constexpr std::size_t kParentDescriptorSize = 130;
 constexpr std::size_t kReductionProofSize = 1'022;
 constexpr std::size_t kParentStepProofSize = 1'056;
+constexpr std::size_t kSetupTranscriptOffset =
+    1 + purify::accountable::RecoveryRootShare::kSerializedSize;
+constexpr std::size_t kAnchorTranscriptOffset =
+    1 + purify::accountable::AnchorEscrowCiphertext::kSerializedSize;
+constexpr std::size_t kSetupRecordSize =
+    1 + purify::accountable::RecoveryRootContribution::
+            kProofSerializedSize;
+constexpr std::size_t kAnchorRecordSize =
+    1 + purify::accountable::AnchorEscrowRecord::kProofPayloadSize;
 constexpr std::size_t kParentProverSetupSize =
-    kParentDescriptorSize + 33 +
-    purify::accountable::RecoveryRootContribution::kSerializedSize +
+    kParentDescriptorSize + 33 + kSetupRecordSize +
     kReductionProofSize + kParentStepProofSize;
 constexpr std::size_t kParentProverAnchorSize =
-    kParentDescriptorSize + 33 +
-    purify::accountable::AnchorEscrowRecord::kSerializedSize +
+    kParentDescriptorSize + 33 + kAnchorRecordSize +
     kReductionProofSize + kParentStepProofSize;
+
+static_assert(kSetupTranscriptOffset == 67);
+static_assert(kAnchorTranscriptOffset == 97);
+static_assert(kSetupRecordSize == 1'137);
+static_assert(kAnchorRecordSize == kSetupRecordSize);
+static_assert(kParentProverSetupSize == 3'378);
+static_assert(kParentProverAnchorSize == kParentProverSetupSize);
 
 template <std::size_t N>
 void append(purify::Bytes& output,
@@ -51,6 +66,16 @@ void append(purify::Bytes& output,
 void append(purify::Bytes& output,
             std::span<const unsigned char> bytes) {
     output.insert(output.end(), bytes.begin(), bytes.end());
+}
+
+void append_compact_record(
+    purify::Bytes& output,
+    std::span<const unsigned char> full_record,
+    std::size_t transcript_offset) {
+    assert(!full_record.empty());
+    assert(transcript_offset <= full_record.size());
+    output.push_back(full_record.front());
+    append(output, full_record.subspan(transcript_offset));
 }
 
 void append_u32_be(purify::Bytes& output, std::uint32_t value) {
@@ -636,7 +661,8 @@ Result<purify::Bytes> serialize_parent_prover_fixture_impl(
                 purify::ErrorCode::InternalMismatch,
                 "slashability_fixture:prover_contribution_size");
         }
-        append(encoded, contribution);
+        append_compact_record(encoded, contribution,
+                              kSetupTranscriptOffset);
         append(encoded, reduction_proof);
         append(encoded, parent_step_proof);
     }
@@ -694,7 +720,8 @@ Result<purify::Bytes> serialize_parent_prover_fixture_impl(
                 purify::ErrorCode::InternalMismatch,
                 "slashability_fixture:prover_record_size");
         }
-        append(encoded, record);
+        append_compact_record(encoded, record,
+                              kAnchorTranscriptOffset);
         append(encoded, reduction_proof);
         append(encoded, parent_step_proof);
     }

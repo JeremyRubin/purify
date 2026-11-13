@@ -137,7 +137,7 @@ it does not add proving code to the verifier backend or ordinary Purify
 library. It is supported only on 64-bit macOS and Linux, and one build emits
 one target architecture.
 
-Produce one proof from a canonical Wit3 frame. Production callers obtain that
+Produce one proof from a canonical Wit4 frame. Production callers obtain that
 frame from the accepted-only C++ formatter; the prover itself checks the
 qualified recursive relation and leaves native acceptance to the verifier:
 
@@ -145,11 +145,11 @@ qualified recursive relation and leaves native acceptance to the verifier:
 /opt/purify/bin/purify-construction-parent-prover \
   /path/to/sha256-parent-prover.pk1.zst \
   /path/to/sha256-parent-verifier.nvk.zst \
-  /path/to/construction.wit3 \
+  /path/to/construction.wit4 \
   /new/path/construction.proof
 ```
 
-The output path must not exist. The prover checks and binds the complete Wit3
+The output path must not exist. The prover checks and binds the complete Wit4
 input before opening either artifact, snapshots and authenticates both exact
 artifacts, consumes PK1 for folding, independently verifies the resulting
 state with VK2, and writes one synced 15,076-byte proof. Producing that proof

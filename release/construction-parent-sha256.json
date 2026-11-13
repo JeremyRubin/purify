@@ -86,15 +86,15 @@
   },
   "qualification_vectors": {
     "status": "qualified",
-    "accepted_wit3": {
-      "path": "tests/vectors/construction_parent_sha256_accepted.wit3",
-      "bytes": 17977,
-      "sha256": "b39168a9e4fb6a5a893a9a4a9479ff55abe4fa3b50708a8c874a08bcd0bbe9f5"
+    "accepted_wit4": {
+      "path": "tests/vectors/construction_parent_sha256_accepted.wit4",
+      "bytes": 17587,
+      "sha256": "77b7331e92a538ebd1bfe90480166b298196ff4dd9a3d8f7557c202a3bab3418"
     },
-    "nondeciding_wit3": {
-      "path": "tests/vectors/construction_parent_sha256_nondeciding.wit3",
-      "bytes": 17977,
-      "sha256": "46a89f4401eb0d34325912ad59c12ac5f9e54d4a57f2ac810ddba6af647d2db7"
+    "nondeciding_wit4": {
+      "path": "tests/vectors/construction_parent_sha256_nondeciding.wit4",
+      "bytes": 17587,
+      "sha256": "9620a21298d175d3c68a5b7b98da82e11065beae2b6048c76625a2b7303a8115"
     },
     "accepted_proof": {
       "path": "tests/vectors/construction_parent_sha256_accepted.proof",

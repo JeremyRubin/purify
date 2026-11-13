@@ -29,22 +29,22 @@ using purify_test::slashability::
     serialize_nondeciding_parent_prover_fixture;
 using purify_test::slashability::serialize_parent_prover_fixture;
 
-#if !defined(PURIFY_TEST_CONSTRUCTION_PARENT_WIT3_PATH)
-#error "construction-parent tests require the accepted Wit3 path"
+#if !defined(PURIFY_TEST_CONSTRUCTION_PARENT_WIT4_PATH)
+#error "construction-parent tests require the accepted Wit4 path"
 #endif
-#if !defined(PURIFY_TEST_CONSTRUCTION_PARENT_NONDECIDING_WIT3_PATH)
-#error "construction-parent tests require the nondeciding Wit3 path"
+#if !defined(PURIFY_TEST_CONSTRUCTION_PARENT_NONDECIDING_WIT4_PATH)
+#error "construction-parent tests require the nondeciding Wit4 path"
 #endif
 
-std::optional<purify::Bytes> load_checked_wit3(
+std::optional<purify::Bytes> load_checked_wit4(
     TestContext& ctx, const char* path) {
-    constexpr std::size_t kFixtureSize = 17'977;
+    constexpr std::size_t kFixtureSize = 17'587;
     std::ifstream input(path, std::ios::binary | std::ios::ate);
-    ctx.expect(input.is_open(), "checked construction Wit3 opens");
+    ctx.expect(input.is_open(), "checked construction Wit4 opens");
     if (!input.is_open()) return std::nullopt;
     const auto size = input.tellg();
     ctx.expect(size == static_cast<std::streamoff>(kFixtureSize),
-               "checked construction Wit3 has exact size");
+               "checked construction Wit4 has exact size");
     if (size != static_cast<std::streamoff>(kFixtureSize)) {
         return std::nullopt;
     }
@@ -52,7 +52,7 @@ std::optional<purify::Bytes> load_checked_wit3(
     purify::Bytes fixture(kFixtureSize);
     input.read(reinterpret_cast<char*>(fixture.data()),
                static_cast<std::streamsize>(fixture.size()));
-    ctx.expect(input.good(), "checked construction Wit3 reads completely");
+    ctx.expect(input.good(), "checked construction Wit4 reads completely");
     if (!input.good()) return std::nullopt;
     return fixture;
 }
@@ -466,7 +466,7 @@ void run_slashability_tests(TestContext& ctx, bool verify_parent) {
                 anchor_witnesses, construction->accumulator,
                 secp.get());
     expect_error(ctx, missing_setup, purify::ErrorCode::SizeMismatch,
-                 "accepted Wit3 rejects a missing setup witness");
+                 "accepted Wit4 rejects a missing setup witness");
     auto reordered_setup = setup_witnesses;
     std::reverse(reordered_setup.begin(), reordered_setup.end());
     auto reordered =
@@ -478,31 +478,89 @@ void run_slashability_tests(TestContext& ctx, bool verify_parent) {
                 anchor_witnesses, construction->accumulator,
                 secp.get());
     expect_error(ctx, reordered, purify::ErrorCode::BindingMismatch,
-                 "accepted Wit3 rejects reordered setup witnesses");
+                 "accepted Wit4 rejects reordered setup witnesses");
 
     auto prover_fixture = serialize_parent_prover_fixture(
         coalition->distributed_setup, *construction, secp.get());
     expect_ok(ctx, prover_fixture,
               "construction prover fixture serializes canonically");
     if (!prover_fixture) return;
+    constexpr std::size_t kProverHeaderSize =
+        16 + 32 + 32 + 64 + 4 + 4;
+    constexpr std::size_t kProverDescriptorSize = 130;
+    constexpr std::size_t kCompactRecordSize = 1'137;
+    constexpr std::size_t kSetupTranscriptOffset =
+        1 + purify::accountable::RecoveryRootShare::kSerializedSize;
+    constexpr std::size_t kAnchorTranscriptOffset =
+        1 + purify::accountable::AnchorEscrowCiphertext::kSerializedSize;
+    constexpr std::size_t kProverSetupSize =
+        kProverDescriptorSize + 33 + kCompactRecordSize +
+        1'022 + 1'056;
+    constexpr std::size_t kProverAnchorSize = kProverSetupSize;
+    constexpr std::size_t kAnchorPublicPrefixSize =
+        kProverDescriptorSize + 33 + 1;
+    constexpr std::size_t kFinalRootSize =
+        purify::accountable::ConstructionReceiptAccumulator::
+            kRootClaimSerializedSize;
     ctx.expect(
-        prover_fixture->size() == 17'977 &&
+        prover_fixture->size() == 17'587 &&
             std::equal(prover_fixture->begin(),
                        prover_fixture->begin() + 16,
                        std::array<unsigned char, 16>{
                            'P', 'u', 'r', 'i', 'f', 'y', '/', 'N',
-                           'o', 'v', 'a', '/', 'W', 'i', 't', '3'}
+                           'o', 'v', 'a', '/', 'W', 'i', 't', '4'}
                            .begin()),
-        "construction prover fixture has the exact v3 frame");
+        "construction prover fixture has the exact v4 frame");
+
+    auto full_setup_record =
+        construction->setup_leaves.front().contribution.serialize(
+            secp.get());
+    expect_ok(ctx, full_setup_record,
+              "setup typed record validates before compact framing");
+    auto full_anchor_record =
+        construction->anchors.front().record.serialize(secp.get());
+    expect_ok(ctx, full_anchor_record,
+              "anchor typed record validates before compact framing");
+    if (!full_setup_record || !full_anchor_record) return;
+    const auto setup_record_offset =
+        kProverHeaderSize + kProverDescriptorSize + 33;
+    const auto anchor_record_offset =
+        kProverHeaderSize +
+        construction->setup_leaves.size() * kProverSetupSize +
+        kProverDescriptorSize + 33;
+    const auto compact_record_matches =
+        [&](std::size_t encoded_offset,
+            const purify::Bytes& full_record,
+            std::size_t transcript_offset) {
+            return full_record.size() >= transcript_offset &&
+                   encoded_offset + kCompactRecordSize <=
+                       prover_fixture->size() &&
+                   (*prover_fixture)[encoded_offset] ==
+                       full_record.front() &&
+                   std::equal(
+                       full_record.begin() + transcript_offset,
+                       full_record.end(),
+                       prover_fixture->begin() + encoded_offset + 1,
+                       prover_fixture->begin() + encoded_offset +
+                           kCompactRecordSize);
+        };
+    ctx.expect(
+        compact_record_matches(setup_record_offset,
+                               *full_setup_record,
+                               kSetupTranscriptOffset) &&
+            compact_record_matches(anchor_record_offset,
+                                   *full_anchor_record,
+                                   kAnchorTranscriptOffset),
+        "Wit4 contains only validated typed-record transcripts");
     write_parent_prover_fixture_if_requested(
         ctx, *prover_fixture,
         "PURIFY_CONSTRUCTION_PARENT_PROVER_FIXTURE_OUT");
-    auto checked_prover_fixture = load_checked_wit3(
-        ctx, PURIFY_TEST_CONSTRUCTION_PARENT_WIT3_PATH);
+    auto checked_prover_fixture = load_checked_wit4(
+        ctx, PURIFY_TEST_CONSTRUCTION_PARENT_WIT4_PATH);
     if (!checked_prover_fixture) return;
     ctx.expect(
         *checked_prover_fixture == *prover_fixture,
-        "accepted construction Wit3 matches the qualified vector");
+        "accepted construction Wit4 matches the qualified vector");
 
     auto nondeciding_fixture =
         serialize_nondeciding_parent_prover_fixture(
@@ -513,25 +571,8 @@ void run_slashability_tests(TestContext& ctx, bool verify_parent) {
     ctx.expect(
         nondeciding_fixture->production_rejection ==
             purify::ErrorCode::EquationMismatch,
-        "accepted Wit3 formatter rejects a false root at native decide");
+        "accepted Wit4 formatter rejects a false root at native decide");
     const auto& nondeciding_bytes = nondeciding_fixture->encoded;
-    constexpr std::size_t kProverHeaderSize =
-        16 + 32 + 32 + 64 + 4 + 4;
-    constexpr std::size_t kProverDescriptorSize = 130;
-    constexpr std::size_t kProverSetupSize =
-        kProverDescriptorSize + 33 +
-        purify::accountable::RecoveryRootContribution::kSerializedSize +
-        1'022 + 1'056;
-    constexpr std::size_t kProverAnchorSize =
-        kProverDescriptorSize + 33 +
-        purify::accountable::AnchorEscrowRecord::kSerializedSize +
-        1'022 + 1'056;
-    constexpr std::size_t kAnchorPublicPrefixSize =
-        kProverDescriptorSize + 33 + 1 +
-        purify::accountable::AnchorEscrowCiphertext::kSerializedSize;
-    constexpr std::size_t kFinalRootSize =
-        purify::accountable::ConstructionReceiptAccumulator::
-            kRootClaimSerializedSize;
     const auto setup_bytes =
         construction->setup_leaves.size() * kProverSetupSize;
     bool same_public_inputs =
@@ -565,12 +606,12 @@ void run_slashability_tests(TestContext& ctx, bool verify_parent) {
     write_parent_prover_fixture_if_requested(
         ctx, nondeciding_bytes,
         "PURIFY_CONSTRUCTION_PARENT_NONDECIDING_PROVER_FIXTURE_OUT");
-    auto checked_nondeciding_fixture = load_checked_wit3(
-        ctx, PURIFY_TEST_CONSTRUCTION_PARENT_NONDECIDING_WIT3_PATH);
+    auto checked_nondeciding_fixture = load_checked_wit4(
+        ctx, PURIFY_TEST_CONSTRUCTION_PARENT_NONDECIDING_WIT4_PATH);
     if (!checked_nondeciding_fixture) return;
     ctx.expect(
         *checked_nondeciding_fixture == nondeciding_bytes,
-        "nondeciding construction Wit3 matches the qualified vector");
+        "nondeciding construction Wit4 matches the qualified vector");
 
     auto accepted_statement = construction->statement;
 #if defined(PURIFY_TEST_REQUIRES_CONSTRUCTION_PARENT_ARTIFACT)

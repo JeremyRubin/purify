@@ -14,16 +14,17 @@ use purify_construction_parent::prover::{
 };
 use thiserror::Error;
 
-// The CLI bounds a Wit3 frame to at most 200 records and 692,497 bytes.
-// Formation V3 policy currently caps setup and anchor entries at 100 each
-// before this boundary.
-const MAX_DEPLOYMENT_WIT3_BYTES: usize = 152 + 100 * 3_444 + 100 * 3_474 + 545;
+// The CLI bounds a Wit4 frame to 200 total leaves. Formation V3 policy
+// currently caps setup and anchor entries at 100 each before this boundary.
+// The frame is 152 header bytes, 3,378 bytes per typed entry, and one
+// 545-byte final root.
+const MAX_DEPLOYMENT_WIT4_BYTES: usize = 152 + 200 * 3_378 + 545;
 
 #[derive(Debug, Error)]
 enum CommandError {
     #[error(
         "usage: {program} <prover-artifact> <verifier-artifact> \
-         <input.wit3> <output.proof>"
+         <input.wit4> <output.proof>"
     )]
     Usage { program: String },
     #[error("cannot inspect construction-parent proof output {path}: {source}")]
@@ -138,19 +139,19 @@ fn read_witness(path: &Path) -> Result<Vec<u8>, CommandError> {
             source,
         })?
         .len()
-        .min(MAX_DEPLOYMENT_WIT3_BYTES as u64 + 1) as usize;
+        .min(MAX_DEPLOYMENT_WIT4_BYTES as u64 + 1) as usize;
     let mut witness = Vec::with_capacity(initial_capacity);
     input
-        .take(MAX_DEPLOYMENT_WIT3_BYTES as u64 + 1)
+        .take(MAX_DEPLOYMENT_WIT4_BYTES as u64 + 1)
         .read_to_end(&mut witness)
         .map_err(|source| CommandError::ReadWitness {
             path: path.to_owned(),
             source,
         })?;
-    if witness.len() > MAX_DEPLOYMENT_WIT3_BYTES {
+    if witness.len() > MAX_DEPLOYMENT_WIT4_BYTES {
         return Err(CommandError::WitnessTooLarge {
             path: path.to_owned(),
-            maximum: MAX_DEPLOYMENT_WIT3_BYTES,
+            maximum: MAX_DEPLOYMENT_WIT4_BYTES,
         });
     }
     Ok(witness)
@@ -223,7 +224,7 @@ mod tests {
         Arguments {
             prover_artifact: directory.join("missing.pk1"),
             verifier_artifact: directory.join("missing.vk2"),
-            witness: directory.join("missing.wit3"),
+            witness: directory.join("missing.wit4"),
             output: directory.join("proof.out"),
         }
     }
@@ -282,15 +283,16 @@ mod tests {
 
     #[test]
     fn oversized_witness_rejects_before_unbounded_allocation() {
+        assert_eq!(MAX_DEPLOYMENT_WIT4_BYTES, 676_297);
         let directory = test_directory("oversized-witness");
         let arguments = nonexistent_inputs(&directory);
-        fs::write(&arguments.witness, vec![0; MAX_DEPLOYMENT_WIT3_BYTES + 1])
+        fs::write(&arguments.witness, vec![0; MAX_DEPLOYMENT_WIT4_BYTES + 1])
             .expect("write oversized witness");
 
         assert!(matches!(
             run(arguments),
             Err(CommandError::WitnessTooLarge {
-                maximum: MAX_DEPLOYMENT_WIT3_BYTES,
+                maximum: MAX_DEPLOYMENT_WIT4_BYTES,
                 ..
             })
         ));

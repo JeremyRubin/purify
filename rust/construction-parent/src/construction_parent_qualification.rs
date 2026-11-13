@@ -39,9 +39,9 @@ use crate::prover::ConstructionParentWitness;
 use crate::secp_native::{standard_generator, SecpEncodedPointWitness, SecpScalarWitness};
 type ConstructionParentNovaSuite =
     SelectedNovaSessionSuite<CONSTRUCTION_RECURRENCE_STATE_ARITY, ConstructionParentStep>;
-const QUALIFIED_ACCEPTED_WIT3_SHA256: [u8; 32] = [
-    0xb3, 0x91, 0x68, 0xa9, 0xe4, 0xfb, 0x6a, 0x5a, 0x89, 0x3a, 0x9a, 0x4a, 0x94, 0x79, 0xff, 0x55,
-    0xab, 0xe4, 0xfa, 0x3b, 0x50, 0x70, 0x8a, 0x8c, 0x87, 0x4a, 0x08, 0xbc, 0xd0, 0xbb, 0xe9, 0xf5,
+const QUALIFIED_ACCEPTED_WIT4_SHA256: [u8; 32] = [
+    0x77, 0xb7, 0x33, 0x1e, 0x92, 0xa5, 0x38, 0xeb, 0xd1, 0xbf, 0xe9, 0x04, 0x80, 0x16, 0x6b, 0x29,
+    0x81, 0x96, 0xff, 0x4d, 0xd9, 0xa3, 0xd8, 0xf7, 0x55, 0x7c, 0x20, 0x2a, 0x3b, 0xab, 0x34, 0x18,
 ];
 
 fn fixed_bincode_shape_length(metrics: R1CSShapeMetrics) -> u64 {
@@ -342,12 +342,12 @@ fn production_relation_digests_match_the_native_leaf_profile() {
     );
 }
 
-fn read_qualification_wit3(environment: &str) -> Vec<u8> {
+fn read_qualification_wit4(environment: &str) -> Vec<u8> {
     let path = std::env::var_os(environment)
         .unwrap_or_else(|| panic!("set {environment} before qualification"));
     let bytes = std::fs::read(path).expect("read construction parent prover fixture");
     eprintln!(
-        "unqualified_wit3_fixture={environment} bytes={} sha256={}",
+        "unqualified_wit4_fixture={environment} bytes={} sha256={}",
         bytes.len(),
         hex(&Sha256::digest(&bytes)),
     );
@@ -355,12 +355,12 @@ fn read_qualification_wit3(environment: &str) -> Vec<u8> {
 }
 
 fn read_qualification_fixture(environment: &str) -> ConstructionParentProverFixture {
-    ConstructionParentProverFixture::parse(&read_qualification_wit3(environment))
+    ConstructionParentProverFixture::parse(&read_qualification_wit4(environment))
         .expect("parse construction parent prover fixture")
 }
 
-fn is_qualified_accepted_wit3(bytes: &[u8]) -> bool {
-    <[u8; 32]>::from(Sha256::digest(bytes)) == QUALIFIED_ACCEPTED_WIT3_SHA256
+fn is_qualified_accepted_wit4(bytes: &[u8]) -> bool {
+    <[u8; 32]>::from(Sha256::digest(bytes)) == QUALIFIED_ACCEPTED_WIT4_SHA256
 }
 
 fn assert_matching_public_fixtures(
@@ -537,17 +537,17 @@ fn exported_sha_parent_fixtures_reconstruct_one_shape() {
 }
 
 #[test]
-fn setup_only_qualification_selects_the_accepted_wit3() {
+fn setup_only_qualification_selects_the_accepted_wit4() {
     let accepted =
-        include_bytes!("../../../tests/vectors/construction_parent_sha256_accepted.wit3");
+        include_bytes!("../../../tests/vectors/construction_parent_sha256_accepted.wit4");
     let nondeciding =
-        include_bytes!("../../../tests/vectors/construction_parent_sha256_nondeciding.wit3");
-    assert!(is_qualified_accepted_wit3(accepted));
-    assert!(!is_qualified_accepted_wit3(nondeciding));
+        include_bytes!("../../../tests/vectors/construction_parent_sha256_nondeciding.wit4");
+    assert!(is_qualified_accepted_wit4(accepted));
+    assert!(!is_qualified_accepted_wit4(nondeciding));
 
     let mut changed = accepted.to_vec();
     changed[0] ^= 1;
-    assert!(!is_qualified_accepted_wit3(&changed));
+    assert!(!is_qualified_accepted_wit4(&changed));
 }
 
 #[test]
@@ -704,13 +704,13 @@ fn setup_only_qualification_persists_a_usable_prover() {
     let verifier_artifact_path =
         qualification_input_path("PURIFY_CONSTRUCTION_PARENT_VERIFIER_ARTIFACT");
 
-    let wit3 = read_qualification_wit3("PURIFY_CONSTRUCTION_PARENT_PROVER_FIXTURE");
+    let wit4 = read_qualification_wit4("PURIFY_CONSTRUCTION_PARENT_PROVER_FIXTURE");
     assert!(
-        is_qualified_accepted_wit3(&wit3),
-        "setup-only qualification requires the frozen accepted Wit3"
+        is_qualified_accepted_wit4(&wit4),
+        "setup-only qualification requires the frozen accepted Wit4"
     );
-    let witness = ConstructionParentWitness::decode(&wit3)
-        .expect("decode accepted construction parent Wit3")
+    let witness = ConstructionParentWitness::decode(&wit4)
+        .expect("decode accepted construction parent Wit4")
         .bind()
         .expect("bind accepted construction parent witness");
     let trusted_step = witness
