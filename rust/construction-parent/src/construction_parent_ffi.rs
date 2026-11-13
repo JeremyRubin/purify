@@ -31,6 +31,7 @@ pub(crate) enum PurifyConstructionParentStatus {
     ArtifactOpenFailed = 4,
     ArtifactRejected = 5,
     InternalError = 6,
+    ArtifactSnapshotFailed = 7,
 }
 
 /// Opaque owner of the locally configured construction verifier.
@@ -110,6 +111,15 @@ fn verifier_status(error: ConstructionParentVerifierError) -> PurifyConstruction
     }
 }
 
+fn artifact_snapshot_status(error: &std::io::Error) -> PurifyConstructionParentStatus {
+    match error.kind() {
+        std::io::ErrorKind::UnexpectedEof | std::io::ErrorKind::InvalidData => {
+            PurifyConstructionParentStatus::ArtifactRejected
+        }
+        _ => PurifyConstructionParentStatus::ArtifactSnapshotFailed,
+    }
+}
+
 /// Snapshots, opens, and authenticates the configured verifier artifact.
 ///
 /// `artifact_path` is an explicit UTF-8 path. The output is set to null before
@@ -147,7 +157,7 @@ pub(crate) unsafe extern "C" fn purify_construction_parent_verifier_load(
         QUALIFIED_SHA256_CONSTRUCTION_PARENT_VERIFIER_ARTIFACT.encoded_length(),
     ) {
         Ok(value) => value,
-        Err(_) => return PurifyConstructionParentStatus::ArtifactRejected,
+        Err(error) => return artifact_snapshot_status(&error),
     };
     drop(artifact_source);
     let verifier = match load_qualified_construction_parent_verifier(artifact.reader()) {
@@ -366,6 +376,32 @@ mod tests {
         };
         assert_eq!(status, PurifyConstructionParentStatus::ArtifactOpenFailed);
         assert!(verifier.is_null());
+    }
+
+    #[test]
+    fn snapshot_failures_distinguish_identity_from_local_storage() {
+        for kind in [
+            std::io::ErrorKind::UnexpectedEof,
+            std::io::ErrorKind::InvalidData,
+        ] {
+            let error = std::io::Error::from(kind);
+            assert_eq!(
+                artifact_snapshot_status(&error),
+                PurifyConstructionParentStatus::ArtifactRejected
+            );
+        }
+
+        for kind in [
+            std::io::ErrorKind::PermissionDenied,
+            std::io::ErrorKind::StorageFull,
+            std::io::ErrorKind::Other,
+        ] {
+            let error = std::io::Error::from(kind);
+            assert_eq!(
+                artifact_snapshot_status(&error),
+                PurifyConstructionParentStatus::ArtifactSnapshotFailed
+            );
+        }
     }
 
     #[test]

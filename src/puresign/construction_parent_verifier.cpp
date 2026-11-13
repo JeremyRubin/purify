@@ -37,6 +37,9 @@ Unexpected<Error> load_error(
     case PURIFY_CONSTRUCTION_PARENT_ARTIFACT_REJECTED:
         return unexpected_error(ErrorCode::InternalMismatch,
                                 "construction_parent:artifact_identity");
+    case PURIFY_CONSTRUCTION_PARENT_ARTIFACT_SNAPSHOT_FAILED:
+        return unexpected_error(ErrorCode::IoWriteFailed,
+                                "construction_parent:artifact_snapshot");
     case PURIFY_CONSTRUCTION_PARENT_PROOF_REJECTED:
     case PURIFY_CONSTRUCTION_PARENT_BUFFER_TOO_SMALL:
     case PURIFY_CONSTRUCTION_PARENT_INTERNAL_ERROR:
@@ -60,6 +63,7 @@ Unexpected<Error> verify_error(
     case PURIFY_CONSTRUCTION_PARENT_BUFFER_TOO_SMALL:
     case PURIFY_CONSTRUCTION_PARENT_ARTIFACT_OPEN_FAILED:
     case PURIFY_CONSTRUCTION_PARENT_ARTIFACT_REJECTED:
+    case PURIFY_CONSTRUCTION_PARENT_ARTIFACT_SNAPSHOT_FAILED:
     case PURIFY_CONSTRUCTION_PARENT_INTERNAL_ERROR:
     case PURIFY_CONSTRUCTION_PARENT_OK:
         return unexpected_error(ErrorCode::InternalMismatch,
