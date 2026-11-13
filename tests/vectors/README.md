@@ -24,26 +24,43 @@ requires the nondeciding proof to fail only at the native decision boundary.
 | Accepted proof | `74b66a779134a39560185472708d94e9a1532240f7fcf9c66a88d91728e8d779` |
 | Nondeciding proof | `a869016dea8d439f579b8c7be6c3613bc3e5f5e9f18f6177ee27c6050038b072` |
 
-The 693,708,278-byte verifier artifact remains external. Its authenticated
-identity and all vector hashes are recorded in
+The 693,708,278-byte VK2 verifier artifact and 693,582,375-byte PK1 prover
+artifact remain external. Their authenticated identities and all vector
+hashes are recorded in
 [`release/construction-parent-sha256.json`](../../release/construction-parent-sha256.json).
 
-Requalification is an explicit native-resource release operation. Every
-output path must not exist before running:
+Full vector requalification is an explicit native-resource release operation.
+Every output path must not exist before running:
 
 ```sh
-PURIFY_CONSTRUCTION_PARENT_PROVER_FIXTURE=/new/path/accepted.wit3 \
-PURIFY_CONSTRUCTION_PARENT_NONDECIDING_PROVER_FIXTURE=/new/path/nondeciding.wit3 \
+cd rust/construction-parent
+PURIFY_CONSTRUCTION_PARENT_PROVER_FIXTURE=/path/to/accepted.wit3 \
+PURIFY_CONSTRUCTION_PARENT_NONDECIDING_PROVER_FIXTURE=/path/to/nondeciding.wit3 \
 PURIFY_CONSTRUCTION_PARENT_PROOF_OUT=/new/path/accepted.proof \
 PURIFY_CONSTRUCTION_PARENT_NONDECIDING_PROOF_OUT=/new/path/nondeciding.proof \
 PURIFY_CONSTRUCTION_PARENT_VERIFIER_ARTIFACT_OUT=/new/path/sha256-parent-verifier.nvk.zst \
-cargo test --manifest-path rust/construction-parent/Cargo.toml --release \
+cargo test --release \
   native_profile_sha_parent_qualification_is_exact -- --ignored --nocapture
 ```
 
-After setup-only qualification emits a fresh accepted proof, pass those exact
-bytes through the same C++ verifier and native accumulation decision used by
-the release gate:
+Select and persist reusable prover state with the frozen accepted Wit3 and an
+independently selected VK2:
+
+```sh
+cd rust/construction-parent
+PURIFY_CONSTRUCTION_PARENT_PROVER_FIXTURE=/path/to/accepted.wit3 \
+PURIFY_CONSTRUCTION_PARENT_PROVER_ARTIFACT_OUT=/new/path/sha256-parent-prover.pk1.zst \
+PURIFY_CONSTRUCTION_PARENT_FRESH_PROOF_OUT=/new/path/fresh-accepted.proof \
+PURIFY_CONSTRUCTION_PARENT_VERIFIER_ARTIFACT=/path/to/sha256-parent-verifier.nvk.zst \
+cargo test --release \
+  setup_only_qualification_persists_a_usable_prover -- --ignored --nocapture
+```
+
+That test authenticates the reloaded PK1, consumes it to produce one fresh
+proof, independently reloads VK2, and verifies the exact recursive final
+state. It does not accept the construction receipt. Pass the fresh proof
+through the same C++ verifier and native accumulation decision used by the
+release gate:
 
 ```sh
 PURIFY_CONSTRUCTION_PARENT_QUALIFICATION_PROOF=/path/to/fresh-accepted.proof \
