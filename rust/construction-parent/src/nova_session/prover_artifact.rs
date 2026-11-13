@@ -24,8 +24,8 @@ use super::{
 use crate::nova_types::DirectRelationId;
 
 const ZSTD_WINDOW_LOG: u32 = 23;
-const MAX_COMPRESSED_PAYLOAD_LENGTH: usize = 8 * 1024 * 1024 * 1024;
-const MAX_DECODED_PAYLOAD_LENGTH: usize = 16 * 1024 * 1024 * 1024;
+const MAX_COMPRESSED_PAYLOAD_LENGTH: usize = 1_000_000_000;
+const MAX_DECODED_PAYLOAD_LENGTH: usize = 4_000_000_000;
 const PROVER_ARTIFACT_FORMAT: ArtifactFormat = ArtifactFormat::new(
     *b"Purify/Nova/PK1\0",
     1,
@@ -275,6 +275,8 @@ mod tests {
 
     #[test]
     fn qualified_pk1_identity_is_frozen() {
+        assert_eq!(MAX_COMPRESSED_PAYLOAD_LENGTH, 1_000_000_000);
+        assert_eq!(MAX_DECODED_PAYLOAD_LENGTH, 4_000_000_000);
         assert_eq!(
             QUALIFIED_CONSTRUCTION_PARENT_PROVER_ARTIFACT.encoded_length(),
             693_582_375
@@ -290,6 +292,14 @@ mod tests {
                 0x2d, 0xf8, 0x5d, 0x6b, 0x0e, 0x43, 0xce, 0x91, 0x3e, 0xb8, 0x0e, 0x4d, 0xff, 0x6a,
                 0xf3, 0x59, 0x22, 0x3b,
             ]
+        );
+        assert!(
+            QUALIFIED_CONSTRUCTION_PARENT_PROVER_ARTIFACT.encoded_length()
+                <= MAX_COMPRESSED_PAYLOAD_LENGTH as u64
+        );
+        assert!(
+            QUALIFIED_CONSTRUCTION_PARENT_PROVER_ARTIFACT.decoded_payload_length()
+                <= MAX_DECODED_PAYLOAD_LENGTH as u64
         );
     }
 
