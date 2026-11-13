@@ -9,7 +9,6 @@ use ff::PrimeField;
 use nova_snark::{provider::Secq256k1Sha256Engine, traits::Engine};
 use thiserror::Error;
 
-#[cfg(feature = "prover")]
 mod artifact_snapshot;
 #[cfg(any(test, feature = "prover"))]
 mod candidate;

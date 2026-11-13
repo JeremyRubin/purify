@@ -8,6 +8,7 @@
 use core::ptr;
 use std::slice;
 
+use crate::artifact_snapshot::PrivateArtifactSnapshot;
 use crate::construction_parent_input::{
     ConstructionParentInputs, CONSTRUCTION_PARENT_LEAF_DESCRIPTOR_BYTES,
 };
@@ -16,6 +17,7 @@ use crate::construction_parent_verifier::{
     ConstructionParentVerifierError,
 };
 use crate::construction_profile::{CONSTRUCTION_RECURRENCE_STATE_ARITY, CONSTRUCTION_ROOT_BYTES};
+use crate::nova_session::verifier_artifact::QUALIFIED_SHA256_CONSTRUCTION_PARENT_VERIFIER_ARTIFACT;
 use crate::nova_session::{SelectedDirectNovaVerifier, QUALIFIED_CONSTRUCTION_PARENT_PROOF_LENGTH};
 
 /// Stable values mirrored by the private construction-parent bridge header.
@@ -108,7 +110,7 @@ fn verifier_status(error: ConstructionParentVerifierError) -> PurifyConstruction
     }
 }
 
-/// Opens and authenticates the configured verifier artifact.
+/// Snapshots, opens, and authenticates the configured verifier artifact.
 ///
 /// `artifact_path` is an explicit UTF-8 path. The output is set to null before
 /// any validation or I/O. The path selects only a storage location; artifact
@@ -136,11 +138,19 @@ pub(crate) unsafe extern "C" fn purify_construction_parent_verifier_load(
         Ok(value) => value,
         Err(_) => return PurifyConstructionParentStatus::Malformed,
     };
-    let mut artifact = match std::fs::File::open(artifact_path) {
+    let mut artifact_source = match std::fs::File::open(artifact_path) {
         Ok(value) => value,
         Err(_) => return PurifyConstructionParentStatus::ArtifactOpenFailed,
     };
-    let verifier = match load_qualified_construction_parent_verifier(&mut artifact) {
+    let mut artifact = match PrivateArtifactSnapshot::copy_from(
+        &mut artifact_source,
+        QUALIFIED_SHA256_CONSTRUCTION_PARENT_VERIFIER_ARTIFACT.encoded_length(),
+    ) {
+        Ok(value) => value,
+        Err(_) => return PurifyConstructionParentStatus::ArtifactRejected,
+    };
+    drop(artifact_source);
+    let verifier = match load_qualified_construction_parent_verifier(artifact.reader()) {
         Ok(value) => value,
         Err(_) => return PurifyConstructionParentStatus::ArtifactRejected,
     };

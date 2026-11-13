@@ -55,7 +55,6 @@ impl ExpectedDirectNovaVerifierArtifact {
         }
     }
 
-    #[cfg(test)]
     pub(crate) const fn encoded_length(self) -> u64 {
         self.identity.encoded_length()
     }

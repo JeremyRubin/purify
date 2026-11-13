@@ -71,7 +71,6 @@ impl ArtifactIdentity {
         }
     }
 
-    #[cfg(any(test, feature = "prover"))]
     pub(crate) const fn encoded_length(self) -> u64 {
         self.encoded_length
     }
