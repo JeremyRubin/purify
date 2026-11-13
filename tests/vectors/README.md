@@ -17,6 +17,12 @@ C++ tests regenerate and byte-compare the Wit4 fixtures. Rust tests parse the
 same checked bytes. The artifact-backed release gate verifies both proofs and
 requires the nondeciding proof to fail only at the native decision boundary.
 
+The qualified fixture contains three setup leaves and two anchor leaves, for
+five recursive steps. The prover CLI bounds Wit4 to 200 total leaves and a
+676,297-byte frame. Char Formation V3 separately caps setup and anchor entries
+at 100 each before this boundary. This qualification does not claim a
+200-step performance measurement.
+
 | Vector | SHA256 |
 | --- | --- |
 | Accepted Wit4 | `77b7331e92a538ebd1bfe90480166b298196ff4dd9a3d8f7557c202a3bab3418` |

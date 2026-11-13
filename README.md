@@ -90,7 +90,10 @@ only the selected PK1 and VK2 identities. Stale centralized artifacts remain
 rejected. Both artifacts contain transparent public setup material and remain
 external deployment resources rather than files embedded in the library,
 prover executable, or repository. Do not deploy a manifest whose release
-status is not `accepted`.
+status is not `accepted`. Each load first copies the complete artifact to an
+unlinked private file, so the configured temporary directory must have at
+least 694 MB of writable space. The standalone prover loads PK1 and VK2
+sequentially rather than retaining both snapshots.
 
 The ordinary CI job builds and tests the Rust, package, codec, and private
 symbol boundaries without downloading these artifacts. It does not claim
