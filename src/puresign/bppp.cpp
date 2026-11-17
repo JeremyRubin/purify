@@ -38,8 +38,10 @@ constexpr std::string_view kMessageNonceTag = "PureSign/Nonce/Message/";
 constexpr std::string_view kTopicNonceTag = "PureSign/Nonce/Topic/";
 constexpr std::string_view kMessageBindingTag = "PureSign/Binding/Message";
 constexpr std::string_view kTopicBindingTag = "PureSign/Binding/Topic";
-constexpr std::string_view kMessageProofTag = "PureSign/BPPP/Proof/Message/V1";
-constexpr std::string_view kTopicProofTag = "PureSign/BPPP/Proof/Topic/V1";
+constexpr std::string_view kMessageProofTag =
+    "PureSign/BPPP/NonceProof/Message/V4";
+constexpr std::string_view kTopicProofTag =
+    "PureSign/BPPP/NonceProof/Topic/V4";
 
 using Scope = PreparedNonce::Scope;
 using ::purify::detail::WipeOnDestruction;
@@ -276,14 +278,21 @@ Result<NonceProof> build_nonce_proof_from_template(const SecretKey& secret,
     Bytes statement_binding = proof_statement_binding(scope);
     std::array<bppp::PointBytes, 1> public_commitments{full_nonce_point};
     PURIFY_ASSIGN_OR_RETURN(
-        auto proof,
-        bppp::prove_experimental_circuit_zk_norm_arg_with_public_commitments(
+        auto publication,
+        bppp::candidate::prove_circuit_zk_norm_arg_v4_with_public_commitments(
             circuit, witness.assignment, secret_prover_seed.value,
-            public_commitments, secp_context, statement_binding, circuit_cache),
-        "build_nonce_proof_from_template:prove_experimental_circuit_zk_norm_arg_with_public_commitments");
+            public_commitments, secp_context, statement_binding,
+            circuit_cache),
+        "build_nonce_proof_from_template:prove_circuit_zk_norm_arg_v4_with_public_commitments");
+    if (publication.proof.norm_proof.size() !=
+        NonceProof::kNormProofSize) {
+        return unexpected_error(
+            ErrorCode::InternalMismatch,
+            "build_nonce_proof_from_template:v4_proof_size");
+    }
 
     auto out = nonce_proof_detail::Access::create(
-        expected_nonce, full_nonce_point, std::move(proof));
+        expected_nonce, full_nonce_point, std::move(publication.proof));
     PURIFY_ASSIGN_OR_RETURN(auto match,
                             nonce_proof_matches_nonce(
                                 out, full_nonce_point, secp_context),
@@ -330,9 +339,17 @@ Result<bool> verify_nonce_proof_with_circuit(const PublicKey& public_key,
     }
     Bytes statement_binding = proof_statement_binding(scope);
     std::array<bppp::PointBytes, 1> public_commitments{full_nonce_point};
-    return bppp::verify_experimental_circuit_zk_norm_arg_with_public_commitments(
-        circuit, nonce_proof_detail::Access::proof(nonce_proof),
-        public_commitments, secp_context, statement_binding, circuit_cache);
+    PURIFY_ASSIGN_OR_RETURN(
+        auto publication,
+        bppp::candidate::
+            reconstruct_circuit_zk_norm_arg_publication_v4_with_public_commitments(
+                circuit, nonce_proof_detail::Access::proof(nonce_proof),
+                public_commitments, secp_context, statement_binding),
+        context);
+    return bppp::candidate::
+        verify_circuit_zk_norm_arg_v4_with_public_commitments(
+            circuit, publication, public_commitments, secp_context,
+            statement_binding, circuit_cache);
 }
 
 }  // namespace

@@ -288,18 +288,20 @@ struct TopicProofCache {
 };
 
 /**
- * Canonical V3 nonce proof transport.
+ * Fixed-purpose V4 nonce leaf proof.
  *
- * An accepted proof binds one exact compressed public nonce point. The point
- * remains private-construction state so callers cannot create an inconsistent
- * typed value without passing through the canonical decoder.
+ * An accepted proof binds one exact public nonce point. This type is an input
+ * to, not an implementation of, a future accumulated parent receipt.
  */
 class NonceProof {
 public:
-    // Version 3 commits raw circuit coordinates before deriving fold weights.
-    static constexpr unsigned char kSerializationVersion = 3;
-    static constexpr std::size_t kInnerProofSize = 844;
-    static constexpr std::size_t kSerializedSize = 228 + kInnerProofSize;
+    // Version 4 uses the SHA-256 transcript and fixed public-commitment
+    // relation required by later accumulation.
+    static constexpr unsigned char kSerializationVersion = 4;
+    static constexpr std::size_t kNormRoundCount = 12;
+    static constexpr std::size_t kNormProofSize = 844;
+    static constexpr std::size_t kSerializedSize = 228 + kNormProofSize;
+    static_assert(kNormProofSize == 65 * kNormRoundCount + 64);
 
     NonceProof(const NonceProof&) = default;
     NonceProof& operator=(const NonceProof&) = default;
@@ -308,7 +310,7 @@ public:
 
     [[nodiscard]] const Nonce& nonce() const noexcept { return nonce_; }
 
-    /** The exact full nonce point claimed by this proof. */
+    /** The exact full nonce point claimed by the public-commitment relation. */
     [[nodiscard]] const bppp::PointBytes& full_nonce_point() const noexcept {
         return full_nonce_point_;
     }
@@ -322,13 +324,18 @@ private:
 
     Nonce nonce_;
     bppp::PointBytes full_nonce_point_{};
-    bppp::ExperimentalCircuitZkNormArgProof proof_;
+    bppp::PointBytes raw_commitment_{};
+    bppp::PointBytes mask_commitment_{};
+    bppp::ScalarBytes t2_{};
+    std::array<unsigned char, 32> public_commitment_dlog_nonce_{};
+    bppp::ScalarBytes public_commitment_dlog_response_{};
+    Bytes norm_proof_;
 
     friend struct nonce_proof_detail::Access;
 };
 
 struct ProvenSignature {
-    static constexpr unsigned char kSerializationVersion = 2;
+    static constexpr unsigned char kSerializationVersion = 3;
     static constexpr std::size_t kSerializedSize =
         1 + NonceProof::kSerializedSize + Signature::kSerializedSize;
 
