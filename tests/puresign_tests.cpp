@@ -9,6 +9,7 @@
 
 #include "purify.hpp"
 #include "purify_test_helpers.hpp"
+#include "puresign_v3_nonce_proof_fixture.hpp"
 
 namespace {
 
@@ -21,6 +22,29 @@ using purify::Bytes;
 using purify::ErrorCode;
 using purify::Result;
 using purify::SecretKey;
+
+unsigned char decode_hex_nibble(char value) {
+    if (value >= '0' && value <= '9') {
+        return static_cast<unsigned char>(value - '0');
+    }
+    if (value >= 'a' && value <= 'f') {
+        return static_cast<unsigned char>(value - 'a' + 10);
+    }
+    return 0xff;
+}
+
+Bytes decode_hex(std::string_view encoded) {
+    if (encoded.size() % 2 != 0) return {};
+    Bytes decoded;
+    decoded.reserve(encoded.size() / 2);
+    for (std::size_t offset = 0; offset < encoded.size(); offset += 2) {
+        const auto high = decode_hex_nibble(encoded[offset]);
+        const auto low = decode_hex_nibble(encoded[offset + 1]);
+        if (high > 0x0f || low > 0x0f) return {};
+        decoded.push_back(static_cast<unsigned char>((high << 4) | low));
+    }
+    return decoded;
+}
 
 purify::SecpContextPtr make_test_secp_context(TestContext& ctx) {
     purify::SecpContextPtr context = purify::make_secp_context();
@@ -596,6 +620,15 @@ void test_puresign_plusplus_message_signing(TestContext& ctx) {
     if (wrong_nonce_proof.has_value()) {
         ctx.expect(!*wrong_nonce_proof, "PureSign++ nonce proof rejects a different message");
     }
+    Result<bool> wrong_scope_proof =
+        public_key.verify_topic_nonce_proof(
+            message, prepared_with_proof->proof(), context.get());
+    expect_ok(ctx, wrong_scope_proof,
+              "PureSign++ V4 proof checks under a different scope");
+    if (wrong_scope_proof.has_value()) {
+        ctx.expect(!*wrong_scope_proof,
+                   "PureSign++ V4 proof rejects a different scope domain");
+    }
 
     Result<purify::puresign_plusplus::PreparedNonceWithProof> cached_prepared_with_proof =
         key_pair->prepare_message_nonce_with_proof(*proof_cache, context.get());
@@ -645,34 +678,124 @@ void test_puresign_plusplus_message_signing(TestContext& ctx) {
     ctx.expect(direct->bytes == proven->signature.bytes,
                "PureSign++ proof signing preserves the deterministic BIP340 signature bytes");
 
-    auto dlog_tampered_proof = proven->nonce_proof;
-    dlog_tampered_proof.proof.public_commitment_dlog_response.back() ^= 1;
-    Result<bool> dlog_tampered_ok = public_key.verify_message_nonce_proof(
-        message, dlog_tampered_proof, context.get());
-    expect_ok(ctx, dlog_tampered_ok,
-              "PureSign++ verifies a tampered DLog response without parser ambiguity");
-    if (dlog_tampered_ok.has_value()) {
-        ctx.expect(!*dlog_tampered_ok,
-                   "PureSign++ rejects a tampered public-commitment DLog response");
-    }
-
     Result<Bytes> nonce_proof_bytes = proven->nonce_proof.serialize(context.get());
     expect_ok(ctx, nonce_proof_bytes, "PureSign++ NonceProof serializes");
     if (nonce_proof_bytes.has_value()) {
-        ctx.expect((*nonce_proof_bytes)[0] == 3,
-                   "PureSign++ NonceProof identifies the raw-precommit transcript");
+        ctx.expect((*nonce_proof_bytes)[0] == 4,
+                   "PureSign++ NonceProof identifies the fixed V4 profile");
         ctx.expect(nonce_proof_bytes->size() == 1072 &&
                        nonce_proof_bytes->size() ==
                            purify::puresign_plusplus::NonceProof::kSerializedSize,
-                   "PureSign++ V3 nonce proof stays within its measured wire budget");
+                   "PureSign++ V4 nonce proof stays within its measured wire budget");
         auto old_transcript_frame = *nonce_proof_bytes;
-        old_transcript_frame[0] = 1;
+        old_transcript_frame[0] = 3;
         expect_error(ctx, purify::puresign_plusplus::NonceProof::deserialize(old_transcript_frame, context.get()),
                      purify::ErrorCode::BackendRejectedInput,
-                     "PureSign++ NonceProof rejects the previous transcript version");
+                     "PureSign++ NonceProof rejects the V3 proof profile");
+
+        Bytes relabeled_v3 =
+            decode_hex(purify_test::kPuresignV3NonceProofHex);
+        ctx.expect(
+            relabeled_v3.size() ==
+                    purify::puresign_plusplus::NonceProof::kSerializedSize &&
+                relabeled_v3.front() == 3,
+            "PureSign++ V3 rejection fixture is canonical");
+        if (relabeled_v3.size() ==
+            purify::puresign_plusplus::NonceProof::kSerializedSize) {
+            relabeled_v3.front() = 4;
+            auto relabeled =
+                purify::puresign_plusplus::NonceProof::deserialize(
+                    relabeled_v3, context.get());
+            bool rejected = !relabeled.has_value();
+            if (relabeled.has_value()) {
+                auto accepted = public_key.verify_message_nonce_proof(
+                    message, *relabeled, context.get());
+                expect_ok(ctx, accepted,
+                          "PureSign++ checks a relabeled V3 proof");
+                rejected = accepted.has_value() && !*accepted;
+            }
+            ctx.expect(rejected,
+                       "PureSign++ V4 rejects an actual V3 proof body");
+        }
         Result<purify::puresign_plusplus::NonceProof> parsed_nonce_proof =
             purify::puresign_plusplus::NonceProof::deserialize(*nonce_proof_bytes, context.get());
         expect_ok(ctx, parsed_nonce_proof, "PureSign++ NonceProof round-trips");
+        if (parsed_nonce_proof.has_value()) {
+            auto roundtrip_bytes =
+                parsed_nonce_proof->serialize(context.get());
+            expect_ok(ctx, roundtrip_bytes,
+                      "PureSign++ parsed NonceProof serializes");
+            if (roundtrip_bytes.has_value()) {
+                ctx.expect(*roundtrip_bytes == *nonce_proof_bytes,
+                           "PureSign++ NonceProof round-trips exactly");
+            }
+        }
+
+        Bytes invalid_full_point = *nonce_proof_bytes;
+        std::fill_n(invalid_full_point.begin() + 33, 33, 0);
+        expect_error(ctx,
+                     purify::puresign_plusplus::NonceProof::deserialize(
+                         invalid_full_point, context.get()),
+                     ErrorCode::BackendRejectedInput,
+                     "PureSign++ NonceProof rejects an invalid full point");
+
+        Bytes invalid_dlog_nonce = *nonce_proof_bytes;
+        std::fill_n(invalid_dlog_nonce.begin() + 164, 32, 0);
+        expect_error(ctx,
+                     purify::puresign_plusplus::NonceProof::deserialize(
+                         invalid_dlog_nonce, context.get()),
+                     ErrorCode::BackendRejectedInput,
+                     "PureSign++ NonceProof rejects an invalid DLog nonce");
+
+        Bytes invalid_round_point = *nonce_proof_bytes;
+        invalid_round_point[228] = 4;
+        expect_error(ctx,
+                     purify::puresign_plusplus::NonceProof::deserialize(
+                         invalid_round_point, context.get()),
+                     ErrorCode::RangeViolation,
+                     "PureSign++ NonceProof rejects invalid round parity");
+
+        Bytes noncanonical_terminal = *nonce_proof_bytes;
+        std::fill(noncanonical_terminal.end() - 32,
+                  noncanonical_terminal.end(), 0xff);
+        expect_error(ctx,
+                     purify::puresign_plusplus::NonceProof::deserialize(
+                         noncanonical_terminal, context.get()),
+                     ErrorCode::RangeViolation,
+                     "PureSign++ NonceProof rejects a non-canonical terminal scalar");
+
+        Bytes dlog_tampered_bytes = *nonce_proof_bytes;
+        std::array<unsigned char, 32> dlog_response{};
+        std::copy_n(dlog_tampered_bytes.begin() + 196, 32,
+                    dlog_response.begin());
+        auto changed_dlog_response =
+            purify::FieldElement::from_bytes32(dlog_response) +
+            purify::FieldElement::one();
+        if (changed_dlog_response.is_zero()) {
+            changed_dlog_response = changed_dlog_response +
+                                    purify::FieldElement::one();
+        }
+        const auto changed_dlog_bytes = changed_dlog_response.to_bytes_be();
+        std::copy(changed_dlog_bytes.begin(), changed_dlog_bytes.end(),
+                  dlog_tampered_bytes.begin() + 196);
+        auto dlog_tampered_proof =
+            purify::puresign_plusplus::NonceProof::deserialize(
+                dlog_tampered_bytes, context.get());
+        expect_ok(ctx, dlog_tampered_proof,
+                  "PureSign++ changed V4 DLog response remains canonical");
+        if (dlog_tampered_proof.has_value()) {
+            Result<bool> dlog_tampered_ok =
+                public_key.verify_message_nonce_proof(
+                    message, *dlog_tampered_proof, context.get());
+            expect_ok(
+                ctx, dlog_tampered_ok,
+                "PureSign++ verifies a changed V4 DLog response");
+            if (dlog_tampered_ok.has_value()) {
+                ctx.expect(
+                    !*dlog_tampered_ok,
+                    "PureSign++ rejects a changed V4 DLog response");
+            }
+        }
 
         Bytes truncated_nonce_proof = *nonce_proof_bytes;
         truncated_nonce_proof.pop_back();
@@ -696,7 +819,7 @@ void test_puresign_plusplus_message_signing(TestContext& ctx) {
                      purify::puresign_plusplus::NonceProof::deserialize(
                          invalid_a, context.get()),
                      ErrorCode::BackendRejectedInput,
-                     "PureSign++ NonceProof rejects an invalid A commitment");
+                     "PureSign++ NonceProof rejects an invalid raw commitment");
 
         Bytes invalid_s = *nonce_proof_bytes;
         std::fill_n(invalid_s.begin() + 99, 33, 0);
@@ -704,7 +827,7 @@ void test_puresign_plusplus_message_signing(TestContext& ctx) {
                      purify::puresign_plusplus::NonceProof::deserialize(
                          invalid_s, context.get()),
                      ErrorCode::BackendRejectedInput,
-                     "PureSign++ NonceProof rejects an invalid S commitment");
+                     "PureSign++ NonceProof rejects an invalid mask commitment");
 
         Bytes noncanonical_t2 = *nonce_proof_bytes;
         std::fill_n(noncanonical_t2.begin() + 132, 32, 0xff);
@@ -719,7 +842,7 @@ void test_puresign_plusplus_message_signing(TestContext& ctx) {
         expect_error(ctx,
                      purify::puresign_plusplus::NonceProof::deserialize(
                          zero_dlog_response, context.get()),
-                     ErrorCode::BackendRejectedInput,
+                     ErrorCode::RangeViolation,
                      "PureSign++ NonceProof rejects a zero DLog response");
 
         Bytes noncanonical_dlog_response = *nonce_proof_bytes;
@@ -735,13 +858,13 @@ void test_puresign_plusplus_message_signing(TestContext& ctx) {
     Result<Bytes> proven_bytes = proven->serialize(context.get());
     expect_ok(ctx, proven_bytes, "PureSign++ ProvenSignature serializes");
     if (proven_bytes.has_value()) {
-        ctx.expect((*proven_bytes)[0] == 2,
+        ctx.expect((*proven_bytes)[0] == 3,
                    "PureSign++ ProvenSignature identifies its fixed framing");
         ctx.expect(
             proven_bytes->size() == 1137 &&
                 proven_bytes->size() ==
                     purify::puresign_plusplus::ProvenSignature::kSerializedSize,
-                   "PureSign++ V3 proven signature stays within its measured wire budget");
+                   "PureSign++ V4 proven signature stays within its measured wire budget");
         Result<purify::puresign_plusplus::ProvenSignature> parsed_proven =
             purify::puresign_plusplus::ProvenSignature::deserialize(*proven_bytes, context.get());
         expect_ok(ctx, parsed_proven, "PureSign++ ProvenSignature round-trips");
@@ -755,12 +878,12 @@ void test_puresign_plusplus_message_signing(TestContext& ctx) {
         }
 
         Bytes old_framing_proven = *proven_bytes;
-        old_framing_proven[0] = 1;
+        old_framing_proven[0] = 2;
         expect_error(ctx,
                      purify::puresign_plusplus::ProvenSignature::deserialize(
                          old_framing_proven, context.get()),
                      ErrorCode::BackendRejectedInput,
-                     "PureSign++ ProvenSignature rejects the length-framed version");
+                     "PureSign++ ProvenSignature rejects the V3 proof frame");
 
         Bytes truncated_proven = *proven_bytes;
         truncated_proven.pop_back();
@@ -815,6 +938,28 @@ void test_puresign_plusplus_topic_signing(TestContext& ctx) {
     expect_ok(ctx, nonce_proof_ok, "PureSign++ PublicKey::verify_topic_nonce_proof succeeds");
     if (nonce_proof_ok.has_value()) {
         ctx.expect(*nonce_proof_ok, "PureSign++ generated topic nonce proof verifies");
+    }
+    const auto exact_full_nonce =
+        prepared_with_proof->proof().full_nonce_point();
+    Result<bool> exact_point_ok = public_key.verify_topic_nonce_proof(
+        topic, exact_full_nonce, prepared_with_proof->proof(),
+        context.get());
+    expect_ok(ctx, exact_point_ok,
+              "PureSign++ topic proof verifies against its exact full point");
+    if (exact_point_ok.has_value()) {
+        ctx.expect(*exact_point_ok,
+                   "PureSign++ exact external full point is accepted");
+    }
+    auto opposite_full_nonce = exact_full_nonce;
+    opposite_full_nonce[0] ^= 1;
+    Result<bool> opposite_point_ok = public_key.verify_topic_nonce_proof(
+        *proof_cache, opposite_full_nonce, prepared_with_proof->proof(),
+        context.get());
+    expect_ok(ctx, opposite_point_ok,
+              "PureSign++ checks an external opposite-parity point");
+    if (opposite_point_ok.has_value()) {
+        ctx.expect(!*opposite_point_ok,
+                   "PureSign++ rejects an x-only-equal external point");
     }
 
     Result<purify::puresign_plusplus::ProvenSignature> proven =

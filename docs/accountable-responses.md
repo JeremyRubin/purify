@@ -36,8 +36,8 @@ PureSign++ topic from the exact aggregate key `Q`, host commitment `U`,
 coalition core digest, and slot. `verify_coalition_nonce_set` first requires
 all three registry values to match its nonce-host-bound roster, then requires
 exactly one topic `NonceProof` for every ordered host and verifies all of them.
-It retains each proof's full 33-byte `commitment_point`, sums those exact
-points, and rejects an aggregate at infinity.
+It retains each proof's full 33-byte nonce point, sums those exact points,
+and rejects an aggregate at infinity.
 
 Success returns `VerifiedCoalitionNonceSet`. Its constructor is private and it
 stores `Q`, `U`, the coalition core digest, the derived topic, and every full
@@ -47,8 +47,8 @@ rejects.
 
 PureSign++ exposes two nonce-scalar views deliberately. `scalar()` is the
 even-Y BIP340 normalization. `raw_scalar()` is the scalar for the proof's full
-compressed `commitment_point`; it negates the normalized scalar for an odd
-point. Accountable response creation must use `raw_scalar()`.
+compressed nonce point; it negates the normalized scalar for an odd point.
+Accountable response creation must use `raw_scalar()`.
 
 ## Scalar-only response acceptance
 

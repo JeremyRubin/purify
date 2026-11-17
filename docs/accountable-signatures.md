@@ -129,24 +129,20 @@ decision. It cannot repair an unsound leaf relation. The construction parent
 does not yet integrate an accountable-signature certificate into its relation
 or into consensus.
 
-### Historical V3 public codec
+### Retired V3 public codec
 
-The current public `NonceProof` codec and `verify_coalition_nonce_set`
-integration still carry V3 proofs while that migration remains pending.
-V3 commits raw circuit coordinates before deriving fold weights. It
-binds each advertised public point through a transcript-derived batched
-DLog check. In the random-oracle and algebraic-group model, the latter
-adds approximately `(m-1)/q` soundness loss for `m` batched openings.
-This analysis is retained as the historical baseline for the legacy
-codec; it is not a security proof for the V4 transcript.
+The public `NonceProof` codec and `verify_coalition_nonce_set` integration use
+the fixed V4 profile. V3 committed raw circuit coordinates before deriving
+fold weights and bound advertised points through a transcript-derived batched
+DLog check. That analysis remains a historical baseline only; the public
+PureSign++ codec rejects V3 frames and provides no compatibility decoder.
 
 The earlier generic arithmetic wrapper permitted output blinding and therefore
-did not establish this exact-point property merely because its honest prover
-used a zero blind. The legacy V3 public-point proof and typed nonce-set
-verifier close that leaf-level gap for the current integration. The V4
-migration must preserve the same exact external-point check. Neither
-path by itself authenticates coalition registration or proves that two
-bodies are economically slashable.
+did not establish the exact-point property merely because its honest prover
+used a zero blind. V4 retains the mandatory DLog relation and requires the
+typed verifier to compare the exact external compressed point, including its
+parity byte. The leaf still does not authenticate coalition registration or
+prove that two bodies are economically slashable.
 
 ## Conflict extraction and low-level helpers
 

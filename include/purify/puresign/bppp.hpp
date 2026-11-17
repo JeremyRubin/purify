@@ -29,7 +29,11 @@ struct TopicProofCache;
 struct Signature;
 class PreparedNonce;
 
-struct NonceProof;
+namespace nonce_proof_detail {
+struct Access;
+}
+
+class NonceProof;
 struct ProvenSignature;
 
 struct PublicKey {
@@ -110,6 +114,21 @@ struct PublicKey {
         bppp::ExperimentalCircuitBackend* circuit_cache = nullptr) const;
 
     /**
+     * @brief Verifies a topic proof against an exact external full nonce point.
+     * @param topic The topic that defines the nonce binding.
+     * @param full_nonce_point The compressed point used by the proof relation.
+     * @param nonce_proof The public nonce proof to verify.
+     * @param circuit_cache Optional BPPP verifier cache to reuse across calls.
+     * @return `true` only when the proof binds this exact point.
+     */
+    [[nodiscard]] Result<bool> verify_topic_nonce_proof(
+        std::span<const unsigned char> topic,
+        const bppp::PointBytes& full_nonce_point,
+        const NonceProof& nonce_proof,
+        purify_secp_context* secp_context,
+        bppp::ExperimentalCircuitBackend* circuit_cache = nullptr) const;
+
+    /**
      * @brief Verifies a topic-bound BPPP nonce proof using a reusable topic cache.
      * @param cache The prebuilt cache for the exact topic bound into the proof.
      * @param nonce_proof The public nonce proof to verify.
@@ -118,6 +137,21 @@ struct PublicKey {
      */
     [[nodiscard]] Result<bool> verify_topic_nonce_proof(
         const TopicProofCache& cache,
+        const NonceProof& nonce_proof,
+        purify_secp_context* secp_context,
+        bppp::ExperimentalCircuitBackend* circuit_cache = nullptr) const;
+
+    /**
+     * @brief Verifies a cached topic proof against an exact full nonce point.
+     * @param cache The prebuilt cache for the exact proof topic.
+     * @param full_nonce_point The compressed point used by the proof relation.
+     * @param nonce_proof The public nonce proof to verify.
+     * @param circuit_cache Optional BPPP verifier cache to reuse across calls.
+     * @return `true` only when the proof binds this exact point.
+     */
+    [[nodiscard]] Result<bool> verify_topic_nonce_proof(
+        const TopicProofCache& cache,
+        const bppp::PointBytes& full_nonce_point,
         const NonceProof& nonce_proof,
         purify_secp_context* secp_context,
         bppp::ExperimentalCircuitBackend* circuit_cache = nullptr) const;
@@ -253,23 +287,55 @@ struct TopicProofCache {
     [[nodiscard]] static Result<TopicProofCache> build(std::span<const unsigned char> topic);
 };
 
-struct NonceProof {
-    // Version 3 commits raw circuit coordinates before deriving fold weights.
-    static constexpr unsigned char kSerializationVersion = 3;
-    static constexpr std::size_t kInnerProofSize = 844;
-    static constexpr std::size_t kSerializedSize = 228 + kInnerProofSize;
+/**
+ * Fixed-purpose V4 nonce leaf proof.
+ *
+ * An accepted proof binds one exact public nonce point. This type is an input
+ * to, not an implementation of, a future accumulated parent receipt.
+ */
+class NonceProof {
+public:
+    // Version 4 uses the SHA-256 transcript and fixed public-commitment
+    // relation required by later accumulation.
+    static constexpr unsigned char kSerializationVersion = 4;
+    static constexpr std::size_t kNormRoundCount = 12;
+    static constexpr std::size_t kNormProofSize = 844;
+    static constexpr std::size_t kSerializedSize = 228 + kNormProofSize;
+    static_assert(kNormProofSize == 65 * kNormRoundCount + 64);
 
-    Nonce nonce;
-    bppp::PointBytes commitment_point{};
-    bppp::ExperimentalCircuitZkNormArgProof proof;
+    NonceProof(const NonceProof&) = default;
+    NonceProof& operator=(const NonceProof&) = default;
+    NonceProof(NonceProof&&) noexcept = default;
+    NonceProof& operator=(NonceProof&&) noexcept = default;
+
+    [[nodiscard]] const Nonce& nonce() const noexcept { return nonce_; }
+
+    /** The exact full nonce point claimed by the public-commitment relation. */
+    [[nodiscard]] const bppp::PointBytes& full_nonce_point() const noexcept {
+        return full_nonce_point_;
+    }
 
     [[nodiscard]] Result<Bytes> serialize(purify_secp_context* secp_context) const;
     [[nodiscard]] static Result<NonceProof> deserialize(std::span<const unsigned char> serialized,
                                                         purify_secp_context* secp_context);
+
+private:
+    NonceProof() = default;
+
+    Nonce nonce_;
+    bppp::PointBytes full_nonce_point_{};
+    bppp::PointBytes raw_commitment_{};
+    bppp::PointBytes mask_commitment_{};
+    bppp::ScalarBytes t2_{};
+    std::array<unsigned char, 32> public_commitment_dlog_nonce_{};
+    bppp::ScalarBytes public_commitment_dlog_response_{};
+    Bytes norm_proof_;
+
+    friend struct nonce_proof_detail::Access;
 };
 
 struct ProvenSignature {
-    static constexpr unsigned char kSerializationVersion = 2;
+    static constexpr unsigned char kSerializationVersion = 3;
     static constexpr std::size_t kSerializedSize =
         1 + NonceProof::kSerializedSize + Signature::kSerializedSize;
 
@@ -419,7 +485,7 @@ public:
      * `scalar()` follows BIP340's even-point normalization. This accessor
      * reverses that normalization when the proof binds an odd compressed
      * point, so the returned scalar always satisfies
-     * `raw_scalar * G == proof().commitment_point`.
+     * `raw_scalar * G == proof().full_nonce_point()`.
      */
     [[nodiscard]] Result<Scalar32> raw_scalar() const;
 
