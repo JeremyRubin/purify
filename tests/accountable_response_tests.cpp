@@ -267,7 +267,7 @@ void run_accountable_response_tests(TestContext& ctx) {
             expect_ok(ctx, normalized_scalar,
                       "normalized nonce scalar exports");
             if (!normalized_scalar) return;
-            if (prepared->proof().commitment_point[0] == 0x03) {
+            if (prepared->proof().full_nonce_point()[0] == 0x03) {
                 saw_odd_raw_nonce = true;
                 ctx.expect(*raw_scalar != *normalized_scalar,
                            "odd raw point reverses BIP340 normalization");
@@ -408,7 +408,7 @@ void run_accountable_response_tests(TestContext& ctx) {
 
         const auto odd = std::find_if(
             proofs.begin(), proofs.end(), [](const auto& proof) {
-                return proof.commitment_point[0] == 0x03;
+                return proof.full_nonce_point()[0] == 0x03;
             });
         if (odd != proofs.end()) {
             const auto odd_index =
@@ -537,7 +537,18 @@ void run_accountable_response_tests(TestContext& ctx) {
                      purify::ErrorCode::SizeMismatch,
                      "missing nonce host rejects");
         auto opposite_parity = proofs;
-        opposite_parity[0].commitment_point[0] ^= 1;
+        auto opposite_parity_bytes = opposite_parity[0].serialize(secp.get());
+        expect_ok(ctx, opposite_parity_bytes,
+                  "full-point parity mutation serializes");
+        if (!opposite_parity_bytes) return;
+        (*opposite_parity_bytes)[33] ^= 1;
+        auto opposite_parity_proof =
+            purify::puresign_plusplus::NonceProof::deserialize(
+                *opposite_parity_bytes, secp.get());
+        expect_ok(ctx, opposite_parity_proof,
+                  "x-only-equal opposite full point parses");
+        if (!opposite_parity_proof) return;
+        opposite_parity[0] = std::move(*opposite_parity_proof);
         ctx.expect(!purify::accountable::verify_coalition_nonce_set(
                        *roster, context, hosts, opposite_parity, secp.get(),
                        &shared_cache),

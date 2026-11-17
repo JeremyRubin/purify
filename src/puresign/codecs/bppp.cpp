@@ -11,8 +11,10 @@
 
 #include <algorithm>
 #include <cassert>
+#include <utility>
 
 #include "../detail/common.hpp"
+#include "../detail/nonce_proof_internal.hpp"
 #include "purify/secp_bridge.h"
 
 namespace purify::puresign_plusplus {
@@ -24,12 +26,14 @@ Result<bool> nonce_proof_matches_nonce(const NonceProof& nonce_proof, purify_sec
     int parity = 0;
     PURIFY_RETURN_IF_ERROR(require_secp_context(secp_context, "nonce_proof_matches_nonce:secp_context"),
                            "nonce_proof_matches_nonce:secp_context");
-    if (purify_bip340_xonly_from_point(secp_context, nonce_proof.commitment_point.data(), xonly.data(), &parity) == 0) {
+    if (purify_bip340_xonly_from_point(
+            secp_context, nonce_proof.full_nonce_point().data(),
+            xonly.data(), &parity) == 0) {
         return unexpected_error(ErrorCode::BackendRejectedInput,
-                                "nonce_proof_matches_nonce:invalid_commitment_point");
+                                "nonce_proof_matches_nonce:invalid_full_point");
     }
     (void)parity;
-    return xonly == nonce_proof.nonce.xonly;
+    return xonly == nonce_proof.nonce().xonly;
 }
 
 Status validate_circuit_proof_encoding(
@@ -158,23 +162,28 @@ Result<Bytes> NonceProof::serialize(purify_secp_context* secp_context) const {
     if (!match) {
         return unexpected_error(ErrorCode::BindingMismatch, "NonceProof::serialize:nonce_mismatch");
     }
+    const auto& circuit_proof = nonce_proof_detail::Access::proof(*this);
     PURIFY_RETURN_IF_ERROR(
-        validate_circuit_proof_encoding(proof, secp_context),
+        validate_circuit_proof_encoding(circuit_proof, secp_context),
         "NonceProof::serialize:circuit_proof");
 
     Bytes out;
     out.reserve(kSerializedSize);
     out.push_back(kSerializationVersion);
-    out.insert(out.end(), nonce.xonly.begin(), nonce.xonly.end());
-    out.insert(out.end(), commitment_point.begin(), commitment_point.end());
-    out.insert(out.end(), proof.a_commitment.begin(), proof.a_commitment.end());
-    out.insert(out.end(), proof.s_commitment.begin(), proof.s_commitment.end());
-    out.insert(out.end(), proof.t2.begin(), proof.t2.end());
-    out.insert(out.end(), proof.public_commitment_dlog_nonce.begin(),
-               proof.public_commitment_dlog_nonce.end());
-    out.insert(out.end(), proof.public_commitment_dlog_response.begin(),
-               proof.public_commitment_dlog_response.end());
-    out.insert(out.end(), proof.proof.begin(), proof.proof.end());
+    out.insert(out.end(), nonce_.xonly.begin(), nonce_.xonly.end());
+    out.insert(out.end(), full_nonce_point_.begin(), full_nonce_point_.end());
+    out.insert(out.end(), circuit_proof.a_commitment.begin(),
+               circuit_proof.a_commitment.end());
+    out.insert(out.end(), circuit_proof.s_commitment.begin(),
+               circuit_proof.s_commitment.end());
+    out.insert(out.end(), circuit_proof.t2.begin(), circuit_proof.t2.end());
+    out.insert(out.end(), circuit_proof.public_commitment_dlog_nonce.begin(),
+               circuit_proof.public_commitment_dlog_nonce.end());
+    out.insert(out.end(),
+               circuit_proof.public_commitment_dlog_response.begin(),
+               circuit_proof.public_commitment_dlog_response.end());
+    out.insert(out.end(), circuit_proof.proof.begin(),
+               circuit_proof.proof.end());
     assert(out.size() == kSerializedSize);
     return out;
 }
@@ -190,27 +199,34 @@ Result<NonceProof> NonceProof::deserialize(std::span<const unsigned char> serial
     if (serialized[0] != kSerializationVersion) {
         return unexpected_error(ErrorCode::BackendRejectedInput, "NonceProof::deserialize:version");
     }
-    NonceProof out{};
-    std::copy_n(serialized.begin() + 1, 32, out.nonce.xonly.begin());
+    Nonce nonce{};
+    std::copy_n(serialized.begin() + 1, 32, nonce.xonly.begin());
     PURIFY_RETURN_IF_ERROR(require_secp_context(secp_context, "NonceProof::deserialize:secp_context"),
                            "NonceProof::deserialize:secp_context");
-    if (purify_bip340_validate_xonly_pubkey(secp_context, out.nonce.xonly.data()) == 0) {
+    if (purify_bip340_validate_xonly_pubkey(
+            secp_context, nonce.xonly.data()) == 0) {
         return unexpected_error(ErrorCode::BackendRejectedInput, "NonceProof::deserialize:nonce");
     }
-    std::copy_n(serialized.begin() + 33, 33, out.commitment_point.begin());
-    std::copy_n(serialized.begin() + 66, 33, out.proof.a_commitment.begin());
-    std::copy_n(serialized.begin() + 99, 33, out.proof.s_commitment.begin());
-    std::copy_n(serialized.begin() + 132, 32, out.proof.t2.begin());
+    bppp::PointBytes full_nonce_point{};
+    std::copy_n(serialized.begin() + 33, 33, full_nonce_point.begin());
+    bppp::ExperimentalCircuitZkNormArgProof circuit_proof{};
+    std::copy_n(serialized.begin() + 66, 33,
+                circuit_proof.a_commitment.begin());
+    std::copy_n(serialized.begin() + 99, 33,
+                circuit_proof.s_commitment.begin());
+    std::copy_n(serialized.begin() + 132, 32, circuit_proof.t2.begin());
     std::copy_n(serialized.begin() + 164, 32,
-                out.proof.public_commitment_dlog_nonce.begin());
+                circuit_proof.public_commitment_dlog_nonce.begin());
     std::copy_n(serialized.begin() + 196, 32,
-                out.proof.public_commitment_dlog_response.begin());
-    out.proof.proof.assign(serialized.begin() + kHeaderSize,
-                           serialized.end());
+                circuit_proof.public_commitment_dlog_response.begin());
+    circuit_proof.proof.assign(serialized.begin() + kHeaderSize,
+                               serialized.end());
     PURIFY_RETURN_IF_ERROR(
-        validate_circuit_proof_encoding(out.proof, secp_context),
+        validate_circuit_proof_encoding(circuit_proof, secp_context),
         "NonceProof::deserialize:circuit_proof");
 
+    auto out = nonce_proof_detail::Access::create(
+        nonce, full_nonce_point, std::move(circuit_proof));
     PURIFY_ASSIGN_OR_RETURN(auto match, nonce_proof_matches_nonce(out, secp_context),
                             "NonceProof::deserialize:nonce_proof_matches_nonce");
     if (!match) {
@@ -250,7 +266,7 @@ Result<ProvenSignature> ProvenSignature::deserialize(std::span<const unsigned ch
                                                    Signature::kSerializedSize),
                                 secp_context),
                             "ProvenSignature::deserialize:signature");
-    return ProvenSignature{signature_value, nonce_proof_value};
+    return ProvenSignature{signature_value, std::move(nonce_proof_value)};
 }
 
 }  // namespace purify::puresign_plusplus

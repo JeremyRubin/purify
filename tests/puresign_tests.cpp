@@ -645,17 +645,6 @@ void test_puresign_plusplus_message_signing(TestContext& ctx) {
     ctx.expect(direct->bytes == proven->signature.bytes,
                "PureSign++ proof signing preserves the deterministic BIP340 signature bytes");
 
-    auto dlog_tampered_proof = proven->nonce_proof;
-    dlog_tampered_proof.proof.public_commitment_dlog_response.back() ^= 1;
-    Result<bool> dlog_tampered_ok = public_key.verify_message_nonce_proof(
-        message, dlog_tampered_proof, context.get());
-    expect_ok(ctx, dlog_tampered_ok,
-              "PureSign++ verifies a tampered DLog response without parser ambiguity");
-    if (dlog_tampered_ok.has_value()) {
-        ctx.expect(!*dlog_tampered_ok,
-                   "PureSign++ rejects a tampered public-commitment DLog response");
-    }
-
     Result<Bytes> nonce_proof_bytes = proven->nonce_proof.serialize(context.get());
     expect_ok(ctx, nonce_proof_bytes, "PureSign++ NonceProof serializes");
     if (nonce_proof_bytes.has_value()) {
@@ -673,6 +662,39 @@ void test_puresign_plusplus_message_signing(TestContext& ctx) {
         Result<purify::puresign_plusplus::NonceProof> parsed_nonce_proof =
             purify::puresign_plusplus::NonceProof::deserialize(*nonce_proof_bytes, context.get());
         expect_ok(ctx, parsed_nonce_proof, "PureSign++ NonceProof round-trips");
+
+        Bytes dlog_tampered_bytes = *nonce_proof_bytes;
+        std::array<unsigned char, 32> dlog_response{};
+        std::copy_n(dlog_tampered_bytes.begin() + 196, 32,
+                    dlog_response.begin());
+        auto changed_dlog_response =
+            purify::FieldElement::from_bytes32(dlog_response) +
+            purify::FieldElement::one();
+        if (changed_dlog_response.is_zero()) {
+            changed_dlog_response = changed_dlog_response +
+                                    purify::FieldElement::one();
+        }
+        const auto changed_dlog_bytes = changed_dlog_response.to_bytes_be();
+        std::copy(changed_dlog_bytes.begin(), changed_dlog_bytes.end(),
+                  dlog_tampered_bytes.begin() + 196);
+        auto dlog_tampered_proof =
+            purify::puresign_plusplus::NonceProof::deserialize(
+                dlog_tampered_bytes, context.get());
+        expect_ok(ctx, dlog_tampered_proof,
+                  "PureSign++ changed V3 DLog response remains canonical");
+        if (dlog_tampered_proof.has_value()) {
+            Result<bool> dlog_tampered_ok =
+                public_key.verify_message_nonce_proof(
+                    message, *dlog_tampered_proof, context.get());
+            expect_ok(
+                ctx, dlog_tampered_ok,
+                "PureSign++ verifies a changed V3 DLog response");
+            if (dlog_tampered_ok.has_value()) {
+                ctx.expect(
+                    !*dlog_tampered_ok,
+                    "PureSign++ rejects a changed V3 DLog response");
+            }
+        }
 
         Bytes truncated_nonce_proof = *nonce_proof_bytes;
         truncated_nonce_proof.pop_back();
@@ -815,6 +837,28 @@ void test_puresign_plusplus_topic_signing(TestContext& ctx) {
     expect_ok(ctx, nonce_proof_ok, "PureSign++ PublicKey::verify_topic_nonce_proof succeeds");
     if (nonce_proof_ok.has_value()) {
         ctx.expect(*nonce_proof_ok, "PureSign++ generated topic nonce proof verifies");
+    }
+    const auto exact_full_nonce =
+        prepared_with_proof->proof().full_nonce_point();
+    Result<bool> exact_point_ok = public_key.verify_topic_nonce_proof(
+        topic, exact_full_nonce, prepared_with_proof->proof(),
+        context.get());
+    expect_ok(ctx, exact_point_ok,
+              "PureSign++ topic proof verifies against its exact full point");
+    if (exact_point_ok.has_value()) {
+        ctx.expect(*exact_point_ok,
+                   "PureSign++ exact external full point is accepted");
+    }
+    auto opposite_full_nonce = exact_full_nonce;
+    opposite_full_nonce[0] ^= 1;
+    Result<bool> opposite_point_ok = public_key.verify_topic_nonce_proof(
+        *proof_cache, opposite_full_nonce, prepared_with_proof->proof(),
+        context.get());
+    expect_ok(ctx, opposite_point_ok,
+              "PureSign++ checks an external opposite-parity point");
+    if (opposite_point_ok.has_value()) {
+        ctx.expect(!*opposite_point_ok,
+                   "PureSign++ rejects an x-only-equal external point");
     }
 
     Result<purify::puresign_plusplus::ProvenSignature> proven =

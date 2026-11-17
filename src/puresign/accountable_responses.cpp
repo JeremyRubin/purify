@@ -243,16 +243,16 @@ Result<VerifiedCoalitionNonceSet> verify_coalition_nonce_set(
     member_nonces.reserve(ordered_proofs.size());
     std::optional<VerifiedCoalitionNonceSet::Point> aggregate;
     for (std::size_t i = 0; i < ordered_proofs.size(); ++i) {
+        const auto point = ordered_proofs[i].full_nonce_point();
         PURIFY_ASSIGN_OR_RETURN(
             const auto& accepted,
             ordered_hosts[i].verify_topic_nonce_proof(
-                proof_cache, ordered_proofs[i], secp_context, cache),
+                proof_cache, point, ordered_proofs[i], secp_context, cache),
             "accountable:nonce_proof");
         if (!accepted) {
             return unexpected_error(ErrorCode::EquationMismatch,
                                     "accountable:nonce_proof");
         }
-        const auto point = ordered_proofs[i].commitment_point;
         member_nonces.push_back(point);
         if (!aggregate) {
             aggregate = point;

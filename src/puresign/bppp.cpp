@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "detail/common.hpp"
+#include "detail/nonce_proof_internal.hpp"
 #include "purify/secp_bridge.h"
 #include "secure_cleanup.hpp"
 
@@ -214,25 +215,27 @@ Result<DerivedNonceData> prepare_nonce_data_impl(const SecretKey& secret,
     return nonce_data;
 }
 
-Result<bppp::PointBytes> commitment_point_from_scalar(const FieldElement& scalar,
-                                                      purify_secp_context* secp_context) {
+Result<bppp::PointBytes> full_nonce_point_from_scalar(
+    const FieldElement& scalar, purify_secp_context* secp_context) {
     Scalar32 blind{};
     return bppp::pedersen_commit_char(blind, bppp::scalar_bytes(scalar), secp_context,
                                       bppp::base_generator(secp_context), bppp::base_generator(secp_context));
 }
 
 Result<bool> nonce_proof_matches_nonce(const NonceProof& nonce_proof,
+                                       const bppp::PointBytes& full_nonce_point,
                                        purify_secp_context* secp_context) {
     XOnly32 xonly{};
     int parity = 0;
     PURIFY_RETURN_IF_ERROR(require_secp_context(secp_context, "nonce_proof_matches_nonce:secp_context"),
                            "nonce_proof_matches_nonce:secp_context");
-    if (purify_bip340_xonly_from_point(secp_context, nonce_proof.commitment_point.data(), xonly.data(), &parity) == 0) {
+    if (purify_bip340_xonly_from_point(secp_context, full_nonce_point.data(),
+                                       xonly.data(), &parity) == 0) {
         return unexpected_error(ErrorCode::BackendRejectedInput,
-                                "nonce_proof_matches_nonce:invalid_commitment_point");
+                                "nonce_proof_matches_nonce:invalid_full_point");
     }
     (void)parity;
-    return xonly == nonce_proof.nonce.xonly;
+    return xonly == nonce_proof.nonce().xonly;
 }
 
 Result<NonceProof> build_nonce_proof_from_template(const SecretKey& secret,
@@ -263,12 +266,15 @@ Result<NonceProof> build_nonce_proof_from_template(const SecretKey& secret,
     PURIFY_RETURN_IF_ERROR(detail::validate_proof_cache_circuit(circuit, "build_nonce_proof_from_template:circuit_shape"),
                            "build_nonce_proof_from_template:validate_proof_cache_circuit");
 
-    PURIFY_ASSIGN_OR_RETURN(auto commitment_point, commitment_point_from_scalar(witness.assignment.commitments.front(), secp_context),
-                            "build_nonce_proof_from_template:commitment_point_from_scalar");
+    PURIFY_ASSIGN_OR_RETURN(
+        auto full_nonce_point,
+        full_nonce_point_from_scalar(
+            witness.assignment.commitments.front(), secp_context),
+        "build_nonce_proof_from_template:full_nonce_point_from_scalar");
     SecretProofSeed secret_prover_seed;
     derive_secret_prover_seed(secret, scope, eval_input, secret_prover_seed);
     Bytes statement_binding = proof_statement_binding(scope);
-    std::array<bppp::PointBytes, 1> public_commitments{commitment_point};
+    std::array<bppp::PointBytes, 1> public_commitments{full_nonce_point};
     PURIFY_ASSIGN_OR_RETURN(
         auto proof,
         bppp::prove_experimental_circuit_zk_norm_arg_with_public_commitments(
@@ -276,11 +282,11 @@ Result<NonceProof> build_nonce_proof_from_template(const SecretKey& secret,
             public_commitments, secp_context, statement_binding, circuit_cache),
         "build_nonce_proof_from_template:prove_experimental_circuit_zk_norm_arg_with_public_commitments");
 
-    NonceProof out{};
-    out.nonce = expected_nonce;
-    out.commitment_point = commitment_point;
-    out.proof = std::move(proof);
-    PURIFY_ASSIGN_OR_RETURN(auto match, nonce_proof_matches_nonce(out, secp_context),
+    auto out = nonce_proof_detail::Access::create(
+        expected_nonce, full_nonce_point, std::move(proof));
+    PURIFY_ASSIGN_OR_RETURN(auto match,
+                            nonce_proof_matches_nonce(
+                                out, full_nonce_point, secp_context),
                             "build_nonce_proof_from_template:nonce_proof_matches_nonce");
     if (!match) {
         return unexpected_error(ErrorCode::InternalMismatch, "build_nonce_proof_from_template:nonce_mismatch");
@@ -305,20 +311,28 @@ Result<NonceProof> build_nonce_proof(const SecretKey& secret,
 Result<bool> verify_nonce_proof_with_circuit(const PublicKey& public_key,
                                              const NativeBulletproofCircuit& circuit,
                                              const NonceProof& nonce_proof,
+                                             const bppp::PointBytes& full_nonce_point,
                                              Scope scope,
                                              purify_secp_context* secp_context,
                                              const char* context,
                                              bppp::ExperimentalCircuitBackend* circuit_cache) {
     PURIFY_RETURN_IF_ERROR(validate_public_key_bundle(public_key, secp_context), context);
     PURIFY_RETURN_IF_ERROR(detail::validate_proof_cache_circuit(circuit, context), context);
-    PURIFY_ASSIGN_OR_RETURN(auto match, nonce_proof_matches_nonce(nonce_proof, secp_context), context);
+    if (nonce_proof.full_nonce_point() != full_nonce_point) {
+        return false;
+    }
+    PURIFY_ASSIGN_OR_RETURN(
+        auto match,
+        nonce_proof_matches_nonce(
+            nonce_proof, full_nonce_point, secp_context), context);
     if (!match) {
         return false;
     }
     Bytes statement_binding = proof_statement_binding(scope);
-    std::array<bppp::PointBytes, 1> public_commitments{nonce_proof.commitment_point};
+    std::array<bppp::PointBytes, 1> public_commitments{full_nonce_point};
     return bppp::verify_experimental_circuit_zk_norm_arg_with_public_commitments(
-        circuit, nonce_proof.proof, public_commitments, secp_context, statement_binding, circuit_cache);
+        circuit, nonce_proof_detail::Access::proof(nonce_proof),
+        public_commitments, secp_context, statement_binding, circuit_cache);
 }
 
 }  // namespace
@@ -474,13 +488,14 @@ Result<Scalar32> PreparedNonceWithProof::raw_scalar() const {
         return unexpected_error(ErrorCode::UninitializedState,
                                 "PreparedNonceWithProof::raw_scalar:consumed");
     }
-    if (proof_.commitment_point[0] != 0x02 &&
-        proof_.commitment_point[0] != 0x03) {
+    const auto& full_nonce_point = proof_.full_nonce_point();
+    if (full_nonce_point[0] != 0x02 &&
+        full_nonce_point[0] != 0x03) {
         return unexpected_error(ErrorCode::RangeViolation,
                                 "PreparedNonceWithProof::raw_scalar:point");
     }
-    if (!std::equal(proof_.commitment_point.begin() + 1,
-                    proof_.commitment_point.end(),
+    if (!std::equal(full_nonce_point.begin() + 1,
+                    full_nonce_point.end(),
                     prepared_.public_nonce().xonly.begin())) {
         return unexpected_error(
             ErrorCode::BindingMismatch,
@@ -488,7 +503,7 @@ Result<Scalar32> PreparedNonceWithProof::raw_scalar() const {
     }
     PURIFY_ASSIGN_OR_RETURN(auto out, prepared_.scalar(),
                             "PreparedNonceWithProof::raw_scalar:scalar");
-    if (proof_.commitment_point[0] == 0x03) {
+    if (full_nonce_point[0] == 0x03) {
         purify_scalar scalar{};
         int overflow = 0;
         purify_scalar_set_b32(&scalar, out.data(), &overflow);
@@ -513,7 +528,7 @@ Result<ProvenSignature> PreparedNonceWithProof::sign_message(const SecretKey& se
     PURIFY_ASSIGN_OR_RETURN(auto signature,
                             api_impl::sign_message_with_prepared(secret, message, std::move(prepared_), secp_context),
                             "PreparedNonceWithProof::sign_message:sign_message_with_prepared");
-    if (signature.nonce().xonly != nonce_proof.nonce.xonly) {
+    if (signature.nonce().xonly != nonce_proof.nonce().xonly) {
         return unexpected_error(ErrorCode::InternalMismatch, "PreparedNonceWithProof::sign_message:nonce_mismatch");
     }
     return ProvenSignature{signature, std::move(nonce_proof)};
@@ -526,7 +541,7 @@ Result<ProvenSignature> PreparedNonceWithProof::sign_topic_message(const SecretK
     PURIFY_ASSIGN_OR_RETURN(auto signature,
                             api_impl::sign_with_prepared_topic(secret, message, std::move(prepared_), secp_context),
                             "PreparedNonceWithProof::sign_topic_message:sign_with_prepared_topic");
-    if (signature.nonce().xonly != nonce_proof.nonce.xonly) {
+    if (signature.nonce().xonly != nonce_proof.nonce().xonly) {
         return unexpected_error(ErrorCode::InternalMismatch, "PreparedNonceWithProof::sign_topic_message:nonce_mismatch");
     }
     return ProvenSignature{signature, std::move(nonce_proof)};
@@ -729,7 +744,8 @@ Result<bool> verify_message_nonce_proof(const PublicKey& public_key, std::span<c
     PURIFY_ASSIGN_OR_RETURN(const auto& circuit,
                             verifier_circuit(detail::tagged_eval_input(kMessageNonceTag, message), public_key.purify_pubkey),
                             "verify_message_nonce_proof:verifier_circuit");
-    return verify_nonce_proof_with_circuit(public_key, circuit, nonce_proof, Scope::Message, secp_context,
+    return verify_nonce_proof_with_circuit(public_key, circuit, nonce_proof,
+                                           nonce_proof.full_nonce_point(), Scope::Message, secp_context,
                                            "verify_message_nonce_proof:verify_nonce_proof_with_circuit",
                                            circuit_cache);
 }
@@ -741,12 +757,14 @@ Result<bool> verify_message_nonce_proof(const MessageProofCache& cache, const Pu
     PURIFY_RETURN_IF_ERROR(validate_message_proof_cache(cache), "verify_message_nonce_proof:validate_message_proof_cache");
     PURIFY_ASSIGN_OR_RETURN(const auto& circuit, cache.circuit_template.instantiate(public_key.purify_pubkey),
                             "verify_message_nonce_proof:instantiate");
-    return verify_nonce_proof_with_circuit(public_key, circuit, nonce_proof, Scope::Message, secp_context,
+    return verify_nonce_proof_with_circuit(public_key, circuit, nonce_proof,
+                                           nonce_proof.full_nonce_point(), Scope::Message, secp_context,
                                            "verify_message_nonce_proof:verify_nonce_proof_with_circuit",
                                            circuit_cache != nullptr ? circuit_cache : &cache.backend_cache);
 }
 
 Result<bool> verify_topic_nonce_proof(const PublicKey& public_key, std::span<const unsigned char> topic,
+                                      const bppp::PointBytes& full_nonce_point,
                                       const NonceProof& nonce_proof,
                                       purify_secp_context* secp_context,
                                       bppp::ExperimentalCircuitBackend* circuit_cache) {
@@ -756,21 +774,44 @@ Result<bool> verify_topic_nonce_proof(const PublicKey& public_key, std::span<con
     PURIFY_ASSIGN_OR_RETURN(const auto& circuit,
                             verifier_circuit(detail::tagged_eval_input(kTopicNonceTag, topic), public_key.purify_pubkey),
                             "verify_topic_nonce_proof:verifier_circuit");
-    return verify_nonce_proof_with_circuit(public_key, circuit, nonce_proof, Scope::Topic, secp_context,
+    return verify_nonce_proof_with_circuit(public_key, circuit, nonce_proof,
+                                           full_nonce_point, Scope::Topic, secp_context,
                                            "verify_topic_nonce_proof:verify_nonce_proof_with_circuit",
                                            circuit_cache);
 }
 
+Result<bool> verify_topic_nonce_proof(const PublicKey& public_key,
+                                      std::span<const unsigned char> topic,
+                                      const NonceProof& nonce_proof,
+                                      purify_secp_context* secp_context,
+                                      bppp::ExperimentalCircuitBackend* circuit_cache) {
+    return verify_topic_nonce_proof(
+        public_key, topic, nonce_proof.full_nonce_point(), nonce_proof,
+        secp_context, circuit_cache);
+}
+
 Result<bool> verify_topic_nonce_proof(const TopicProofCache& cache, const PublicKey& public_key,
+                                      const bppp::PointBytes& full_nonce_point,
                                       const NonceProof& nonce_proof,
                                       purify_secp_context* secp_context,
                                       bppp::ExperimentalCircuitBackend* circuit_cache) {
     PURIFY_RETURN_IF_ERROR(validate_topic_proof_cache(cache), "verify_topic_nonce_proof:validate_topic_proof_cache");
     PURIFY_ASSIGN_OR_RETURN(const auto& circuit, cache.circuit_template.instantiate(public_key.purify_pubkey),
                             "verify_topic_nonce_proof:instantiate");
-    return verify_nonce_proof_with_circuit(public_key, circuit, nonce_proof, Scope::Topic, secp_context,
+    return verify_nonce_proof_with_circuit(public_key, circuit, nonce_proof,
+                                           full_nonce_point, Scope::Topic, secp_context,
                                            "verify_topic_nonce_proof:verify_nonce_proof_with_circuit",
                                            circuit_cache != nullptr ? circuit_cache : &cache.backend_cache);
+}
+
+Result<bool> verify_topic_nonce_proof(const TopicProofCache& cache,
+                                      const PublicKey& public_key,
+                                      const NonceProof& nonce_proof,
+                                      purify_secp_context* secp_context,
+                                      bppp::ExperimentalCircuitBackend* circuit_cache) {
+    return verify_topic_nonce_proof(
+        cache, public_key, nonce_proof.full_nonce_point(), nonce_proof,
+        secp_context, circuit_cache);
 }
 
 Result<bool> verify_message_signature_with_proof(const PublicKey& public_key,
@@ -783,7 +824,7 @@ Result<bool> verify_message_signature_with_proof(const PublicKey& public_key,
     if (!sig_ok) {
         return false;
     }
-    if (signature.signature.nonce().xonly != signature.nonce_proof.nonce.xonly) {
+    if (signature.signature.nonce().xonly != signature.nonce_proof.nonce().xonly) {
         return false;
     }
     return verify_message_nonce_proof(public_key, message, signature.nonce_proof, secp_context, circuit_cache);
@@ -798,7 +839,7 @@ Result<bool> verify_message_signature_with_proof(const MessageProofCache& cache,
     if (!sig_ok) {
         return false;
     }
-    if (signature.signature.nonce().xonly != signature.nonce_proof.nonce.xonly) {
+    if (signature.signature.nonce().xonly != signature.nonce_proof.nonce().xonly) {
         return false;
     }
     return verify_message_nonce_proof(cache, public_key, signature.nonce_proof, secp_context, circuit_cache);
@@ -815,7 +856,7 @@ Result<bool> verify_topic_signature_with_proof(const PublicKey& public_key,
     if (!sig_ok) {
         return false;
     }
-    if (signature.signature.nonce().xonly != signature.nonce_proof.nonce.xonly) {
+    if (signature.signature.nonce().xonly != signature.nonce_proof.nonce().xonly) {
         return false;
     }
     return verify_topic_nonce_proof(public_key, topic, signature.nonce_proof, secp_context, circuit_cache);
@@ -831,7 +872,7 @@ Result<bool> verify_topic_signature_with_proof(const TopicProofCache& cache, con
     if (!sig_ok) {
         return false;
     }
-    if (signature.signature.nonce().xonly != signature.nonce_proof.nonce.xonly) {
+    if (signature.signature.nonce().xonly != signature.nonce_proof.nonce().xonly) {
         return false;
     }
     return verify_topic_nonce_proof(cache, public_key, signature.nonce_proof, secp_context, circuit_cache);
@@ -868,10 +909,32 @@ Result<bool> PublicKey::verify_topic_nonce_proof(std::span<const unsigned char> 
     return api_impl::verify_topic_nonce_proof(*this, topic, nonce_proof, secp_context, circuit_cache);
 }
 
+Result<bool> PublicKey::verify_topic_nonce_proof(
+    std::span<const unsigned char> topic,
+    const bppp::PointBytes& full_nonce_point,
+    const NonceProof& nonce_proof,
+    purify_secp_context* secp_context,
+    bppp::ExperimentalCircuitBackend* circuit_cache) const {
+    return api_impl::verify_topic_nonce_proof(
+        *this, topic, full_nonce_point, nonce_proof, secp_context,
+        circuit_cache);
+}
+
 Result<bool> PublicKey::verify_topic_nonce_proof(const TopicProofCache& cache, const NonceProof& nonce_proof,
                                                  purify_secp_context* secp_context,
                                                  bppp::ExperimentalCircuitBackend* circuit_cache) const {
     return api_impl::verify_topic_nonce_proof(cache, *this, nonce_proof, secp_context, circuit_cache);
+}
+
+Result<bool> PublicKey::verify_topic_nonce_proof(
+    const TopicProofCache& cache,
+    const bppp::PointBytes& full_nonce_point,
+    const NonceProof& nonce_proof,
+    purify_secp_context* secp_context,
+    bppp::ExperimentalCircuitBackend* circuit_cache) const {
+    return api_impl::verify_topic_nonce_proof(
+        cache, *this, full_nonce_point, nonce_proof, secp_context,
+        circuit_cache);
 }
 
 Result<bool> PublicKey::verify_message_signature_with_proof(std::span<const unsigned char> message,
