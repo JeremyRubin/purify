@@ -513,12 +513,12 @@ ConstructionLeafAccumulator::derive_parent_constants(
     const AnchorPunishmentPublicKey& punishment_key,
     const AnchorEscrowContextDigest& context_digest,
     const AnchorEscrowCiphertext& ciphertext,
-    const bppp::ScalarBytes& circuit_precommitment,
+    const bppp::PointBytes& raw_commitment,
     purify_secp_context* secp_context) const {
     return derive_pending_anchor_parent_constants(
         roster, roster.recovery_root(), advertised_anchor_root,
         punishment_key, context_digest, ciphertext,
-        circuit_precommitment, secp_context);
+        raw_commitment, secp_context);
 }
 
 Result<ConstructionLeafParentConstants>
@@ -529,31 +529,30 @@ ConstructionLeafAccumulator::derive_pending_anchor_parent_constants(
     const AnchorPunishmentPublicKey& punishment_key,
     const AnchorEscrowContextDigest& context_digest,
     const AnchorEscrowCiphertext& ciphertext,
-    const bppp::ScalarBytes& circuit_precommitment,
+    const bppp::PointBytes& raw_commitment,
     purify_secp_context* secp_context) const {
     PURIFY_RETURN_IF_ERROR(require_anchor_v4_hash_suite());
     PURIFY_RETURN_IF_ERROR(require_secp_context(secp_context));
     PURIFY_RETURN_IF_ERROR(require_roster(roster));
-    PURIFY_ASSIGN_OR_RETURN(
-        const auto precommitment,
-        bppp::candidate::CircuitPrecommitmentDigestV4::parse(
-            circuit_precommitment));
     PURIFY_ASSIGN_OR_RETURN(const auto circuit,
                             public_escrow_circuit(recovery_root, ciphertext));
     PURIFY_ASSIGN_OR_RETURN(
         const auto binding,
         escrow_binding(roster, recovery_root, advertised_anchor_root,
                        punishment_key, context_digest, ciphertext));
+    // The precommitment is recomputed from this registered punishment point,
+    // which is what ties the parent's discrete-log check to it.
     const std::array<PointBytes, 1> outputs{
         punishment_point(punishment_key)};
     PURIFY_ASSIGN_OR_RETURN(
         auto constants,
         bppp::candidate::
             derive_circuit_norm_parent_constants_v4_with_public_commitments(
-                circuit, precommitment, outputs, secp_context, binding));
+                circuit, raw_commitment, outputs, secp_context, binding));
     return ConstructionLeafParentConstants{
         std::move(constants.circuit_binding_digest),
         std::move(constants.raw_generator_digest),
+        constants.precommitment.bytes(),
         std::move(constants.coefficient_commitment),
         std::move(constants.anchored_offset)};
 }
@@ -593,7 +592,8 @@ ConstructionLeafAccumulator::prepare(
     PURIFY_ASSIGN_OR_RETURN(auto norm,
                             bppp::accumulation::prepare_v4_circuit_norm_for_algebraic_reduction(
                                 basis_, std::move(*prepared), secp_context));
-    return PreparedConstructionLeaf(circuit_precommitment, std::move(norm));
+    return PreparedConstructionLeaf(record.proof_.raw_commitment,
+                                    circuit_precommitment, std::move(norm));
 }
 
 Result<AnchorPunishmentKey> recover_distributed_escrowed_anchor(

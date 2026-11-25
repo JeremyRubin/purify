@@ -13,6 +13,7 @@
 #include <utility>
 #include <vector>
 
+#include "bppp_bridge.h"
 #include "byte_io.hpp"
 #include "checked_size.hpp"
 #include "purify/curve.hpp"
@@ -30,11 +31,12 @@ Status validate_ciphertext(const AnchorEscrowCiphertext& ciphertext) {
     return validate_public_points(ciphertext.ephemeral_key);
 }
 
-Status validate_circuit_precommitment(
-    const bppp::ScalarBytes& circuit_precommitment) {
-    PURIFY_ASSIGN_OR_RETURN(const auto& scalar, FieldElement::try_from_bytes32(
-                                                    circuit_precommitment));
-    if (scalar.is_zero()) {
+/** A raw commitment is a finite secp256k1 point in canonical compressed form. */
+Status validate_raw_commitment(const bppp::PointBytes& raw_commitment) {
+    if (raw_commitment[0] != 0x02 && raw_commitment[0] != 0x03) {
+        return unexpected_error(ErrorCode::RangeViolation);
+    }
+    if (purify_bppp_public_point_validate(raw_commitment.data()) == 0) {
         return unexpected_error(ErrorCode::RangeViolation);
     }
     return {};
@@ -50,8 +52,7 @@ Status validate_anchor_entries(
     }
     for (const ConstructionReceiptAnchorEntry& entry : entries) {
         PURIFY_RETURN_IF_ERROR(validate_ciphertext(entry.ciphertext));
-        PURIFY_RETURN_IF_ERROR(
-            validate_circuit_precommitment(entry.circuit_precommitment));
+        PURIFY_RETURN_IF_ERROR(validate_raw_commitment(entry.raw_commitment));
     }
     return {};
 }
@@ -68,8 +69,7 @@ Status validate_setup_entries(
     std::vector<RecoveryRootShare> shares;
     shares.reserve(entries.size());
     for (const ConstructionReceiptSetupEntry& entry : entries) {
-        PURIFY_RETURN_IF_ERROR(
-            validate_circuit_precommitment(entry.circuit_precommitment));
+        PURIFY_RETURN_IF_ERROR(validate_raw_commitment(entry.raw_commitment));
         shares.push_back(entry.share);
     }
     PURIFY_ASSIGN_OR_RETURN(const auto aggregate,
@@ -181,11 +181,11 @@ Bytes ConstructionReceiptPayload::serialize() const {
     for (const ConstructionReceiptSetupEntry& entry : setup_entries_) {
         const auto share = entry.share.serialize();
         encoded.insert(encoded.end(), share.begin(), share.end());
-        append_array(encoded, entry.circuit_precommitment);
+        append_array(encoded, entry.raw_commitment);
     }
     for (const ConstructionReceiptAnchorEntry& entry : anchor_entries_) {
         append_ciphertext(encoded, entry.ciphertext);
-        append_array(encoded, entry.circuit_precommitment);
+        append_array(encoded, entry.raw_commitment);
     }
     assert(encoded.size() == serialized_size());
     return encoded;
@@ -234,12 +234,12 @@ Result<ConstructionReceiptPayload> ConstructionReceiptPayload::deserialize(
             auto share, RecoveryRootShare::deserialize(encoded.subspan(
                             offset, RecoveryRootShare::kSerializedSize)));
         offset += RecoveryRootShare::kSerializedSize;
-        bppp::ScalarBytes precommitment{};
+        bppp::PointBytes raw_commitment{};
         std::copy_n(encoded.begin() + offset,
-                    precommitment.size(), precommitment.begin());
-        offset += precommitment.size();
-        PURIFY_RETURN_IF_ERROR(validate_circuit_precommitment(precommitment));
-        setup_entries.emplace_back(std::move(share), precommitment);
+                    raw_commitment.size(), raw_commitment.begin());
+        offset += raw_commitment.size();
+        PURIFY_RETURN_IF_ERROR(validate_raw_commitment(raw_commitment));
+        setup_entries.emplace_back(std::move(share), raw_commitment);
     }
 
     std::vector<ConstructionReceiptAnchorEntry> anchor_entries;
@@ -255,11 +255,10 @@ Result<ConstructionReceiptPayload> ConstructionReceiptPayload::deserialize(
         offset += AnchorEscrowCiphertext::kSerializedSize;
         std::copy_n(
             encoded.begin() + offset,
-            entry.circuit_precommitment.size(),
-            entry.circuit_precommitment.begin());
-        offset += entry.circuit_precommitment.size();
-        PURIFY_RETURN_IF_ERROR(
-            validate_circuit_precommitment(entry.circuit_precommitment));
+            entry.raw_commitment.size(),
+            entry.raw_commitment.begin());
+        offset += entry.raw_commitment.size();
+        PURIFY_RETURN_IF_ERROR(validate_raw_commitment(entry.raw_commitment));
         anchor_entries.push_back(std::move(entry));
     }
     assert(offset == encoded.size());

@@ -20,10 +20,14 @@ void append(std::vector<unsigned char>& output,
     output.insert(output.end(), bytes.begin(), bytes.end());
 }
 
+/**
+ * Appends one leaf descriptor. Every field, including the precommitment, was
+ * derived by this verifier from registry inputs and the payload's raw
+ * commitment; none is copied from the payload.
+ */
 Status append_constants(
     std::vector<unsigned char>& descriptors,
     const ConstructionLeafParentConstants& constants,
-    const bppp::ScalarBytes& circuit_precommitment,
     std::array<unsigned char, 32>& raw_generator_digest,
     bool& have_raw_generator_digest) {
     if (have_raw_generator_digest &&
@@ -33,7 +37,7 @@ Status append_constants(
     raw_generator_digest = constants.raw_generator_digest;
     have_raw_generator_digest = true;
     append(descriptors, constants.circuit_binding_digest);
-    append(descriptors, circuit_precommitment);
+    append(descriptors, constants.circuit_precommitment);
     append(descriptors, constants.coefficient_commitment);
     append(descriptors, constants.anchored_offset);
     return {};
@@ -92,11 +96,11 @@ resolve_construction_parent_public_inputs(
         PURIFY_ASSIGN_OR_RETURN(auto constants,
                                 leaves.derive_parent_constants(
                                     setup.roster(), setup.formation(), index,
-                                    entry.share, entry.circuit_precommitment,
+                                    entry.share, entry.raw_commitment,
                                     secp_context));
         PURIFY_RETURN_IF_ERROR(append_constants(
-            descriptors, constants, entry.circuit_precommitment,
-            raw_generator_digest, have_raw_generator_digest));
+            descriptors, constants, raw_generator_digest,
+            have_raw_generator_digest));
     }
     for (std::size_t index = 0; index < anchor_entries.size(); ++index) {
         const auto& resolved = resolved_entries[index];
@@ -106,10 +110,10 @@ resolve_construction_parent_public_inputs(
             leaves.derive_pending_anchor_parent_constants(
                 setup.roster(), setup.recovery_root(), resolved.anchor_root,
                 resolved.punishment_key, resolved.context_digest,
-                entry.ciphertext, entry.circuit_precommitment, secp_context));
+                entry.ciphertext, entry.raw_commitment, secp_context));
         PURIFY_RETURN_IF_ERROR(append_constants(
-            descriptors, constants, entry.circuit_precommitment,
-            raw_generator_digest, have_raw_generator_digest));
+            descriptors, constants, raw_generator_digest,
+            have_raw_generator_digest));
     }
 
     return ResolvedConstructionParentPublicInputs{

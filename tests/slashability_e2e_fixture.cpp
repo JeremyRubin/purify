@@ -313,11 +313,16 @@ make_native_accumulation_reference(
                                coalition.registry_roster, coalition.formation,
                                i, contribution, secp_context, &shared_cache));
         const auto precommitment = prepared.circuit_precommitment();
+        const auto raw_commitment = prepared.raw_commitment();
         PURIFY_ASSIGN_OR_RETURN(
             auto parent_constants,
             accumulator.leaves().derive_parent_constants(
                 coalition.registry_roster, coalition.formation, i,
-                contribution.share(), precommitment, secp_context));
+                contribution.share(), raw_commitment, secp_context));
+        if (parent_constants.circuit_precommitment != precommitment) {
+            return purify::unexpected_error(
+                purify::ErrorCode::BindingMismatch);
+        }
         PURIFY_ASSIGN_OR_RETURN(
             auto reduction,
             purify::bppp::accumulation::prove_algebraic_norm_reduction(
@@ -338,7 +343,7 @@ make_native_accumulation_reference(
         current = std::move(next);
 
         payload_setup_entries.emplace_back(
-            contribution.share(), precommitment);
+            contribution.share(), raw_commitment);
         PURIFY_ASSIGN_OR_RETURN(
             auto weighted_member_key,
             public_point(coalition.registry_roster.members()[i].coefficient *
@@ -386,12 +391,17 @@ make_native_accumulation_reference(
                                          punishment_key.public_key(), context,
                                          record, secp_context, &shared_cache));
         const auto precommitment = prepared.circuit_precommitment();
+        const auto raw_commitment = prepared.raw_commitment();
         PURIFY_ASSIGN_OR_RETURN(
             auto parent_constants,
             accumulator.leaves().derive_parent_constants(
                 coalition.distributed_setup.roster(), recovery_key.public_key,
                 punishment_key.public_key(), context, record.ciphertext(),
-                precommitment, secp_context));
+                raw_commitment, secp_context));
+        if (parent_constants.circuit_precommitment != precommitment) {
+            return purify::unexpected_error(
+                purify::ErrorCode::BindingMismatch);
+        }
         PURIFY_ASSIGN_OR_RETURN(
             auto reduction,
             purify::bppp::accumulation::prove_algebraic_norm_reduction(
@@ -413,7 +423,7 @@ make_native_accumulation_reference(
 
         const auto reference = anchor_reference(i);
         payload_anchor_entries.emplace_back(
-            record.ciphertext(), precommitment);
+            record.ciphertext(), raw_commitment);
         resolved_entries.emplace_back(
             reference, recovery_key.public_key,
             punishment_key.public_key(), context);
@@ -751,8 +761,10 @@ serialize_nondeciding_parent_prover_fixture(
             coalition.distributed_setup.roster(),
             anchor.recovery_key.public_key, anchor.punishment_key.public_key(),
             anchor.context, changed_record.ciphertext(),
-            anchor.circuit_precommitment, secp_context));
-    if (parent_constants.circuit_binding_digest !=
+            prepared.raw_commitment(), secp_context));
+    if (parent_constants.circuit_precommitment !=
+            anchor.circuit_precommitment ||
+        parent_constants.circuit_binding_digest !=
             anchor.parent_constants.circuit_binding_digest ||
         parent_constants.raw_generator_digest !=
             anchor.parent_constants.raw_generator_digest ||

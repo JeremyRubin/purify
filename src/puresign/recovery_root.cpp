@@ -736,18 +736,16 @@ ConstructionLeafAccumulator::derive_parent_constants(
     const NonceHostBoundSigningRoster& roster,
     const CoalitionFormation& formation, std::size_t member_index,
     const RecoveryRootShare& share,
-    const bppp::ScalarBytes& circuit_precommitment,
+    const bppp::PointBytes& raw_commitment,
     purify_secp_context* secp_context) const {
     PURIFY_RETURN_IF_ERROR(require_recovery_contribution_hash_suite());
     PURIFY_RETURN_IF_ERROR(require_secp_context(secp_context));
-    PURIFY_ASSIGN_OR_RETURN(
-        const auto precommitment,
-        bppp::candidate::CircuitPrecommitmentDigestV4::parse(
-            circuit_precommitment));
     PURIFY_ASSIGN_OR_RETURN(const auto circuit, contribution_circuit(share));
     PURIFY_ASSIGN_OR_RETURN(
         const auto binding,
         contribution_binding(roster, formation, member_index, share));
+    // The precommitment is recomputed from this roster-derived weighted
+    // point, which is what ties the parent's discrete-log check to it.
     PURIFY_ASSIGN_OR_RETURN(
         const auto weighted,
         weighted_member_point(roster, member_index, secp_context));
@@ -756,10 +754,11 @@ ConstructionLeafAccumulator::derive_parent_constants(
         auto constants,
         bppp::candidate::
             derive_circuit_norm_parent_constants_v4_with_public_commitments(
-                circuit, precommitment, outputs, secp_context, binding));
+                circuit, raw_commitment, outputs, secp_context, binding));
     return ConstructionLeafParentConstants{
         std::move(constants.circuit_binding_digest),
         std::move(constants.raw_generator_digest),
+        constants.precommitment.bytes(),
         std::move(constants.coefficient_commitment),
         std::move(constants.anchored_offset)};
 }
@@ -795,8 +794,8 @@ ConstructionLeafAccumulator::prepare(
     PURIFY_ASSIGN_OR_RETURN(auto norm,
                             bppp::accumulation::prepare_v4_circuit_norm_for_algebraic_reduction(
                                 basis_, std::move(*prepared), secp_context));
-    return PreparedConstructionLeaf(circuit_precommitment,
-                                    std::move(norm));
+    return PreparedConstructionLeaf(contribution.proof_.raw_commitment,
+                                    circuit_precommitment, std::move(norm));
 }
 
 } // namespace purify::accountable

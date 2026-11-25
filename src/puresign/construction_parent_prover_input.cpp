@@ -184,8 +184,7 @@ Result<Bytes> serialize_accepted_construction_parent_witness(
                                     resolved_setup.roster(),
                                     resolved_setup.formation(), index,
                                     witness.contribution, secp_context, cache));
-        if (prepared.circuit_precommitment() !=
-            entry.circuit_precommitment) {
+        if (prepared.raw_commitment() != entry.raw_commitment) {
             return unexpected_error(ErrorCode::BindingMismatch);
         }
         PURIFY_ASSIGN_OR_RETURN(
@@ -212,8 +211,7 @@ Result<Bytes> serialize_accepted_construction_parent_witness(
                                verified_setup.roster(), resolved.anchor_root,
                                resolved.punishment_key, resolved.context_digest,
                                witness.record, secp_context, cache));
-        if (prepared.circuit_precommitment() !=
-            entry.circuit_precommitment) {
+        if (prepared.raw_commitment() != entry.raw_commitment) {
             return unexpected_error(ErrorCode::BindingMismatch);
         }
         PURIFY_ASSIGN_OR_RETURN(
