@@ -15,8 +15,11 @@ Result<SecretVector<FieldElement>>
 derive_secret_scalars(std::size_t count, std::span<const unsigned char> seed,
                       const TaggedHash &tag, std::uint64_t attempt) {
   SecretVector<FieldElement> out(count, FieldElement::zero());
+  // Absorb the seed once. It can be the whole witness, and hashing it again
+  // for each of tens of thousands of scalars dominated the prover.
+  const SeedHash seed_hash(tag, seed);
   for (std::size_t i = 0; i < out.size(); ++i) {
-    PURIFY_RETURN_IF_ERROR(derive_scalar(out[i], seed, tag, i, attempt));
+    PURIFY_RETURN_IF_ERROR(derive_scalar(out[i], seed_hash, i, attempt));
   }
   return out;
 }

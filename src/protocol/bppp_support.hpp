@@ -99,9 +99,39 @@ Result<FieldElement> derive_nonzero_scalar(std::span<const unsigned char> seed,
                                            const TaggedHash& tag,
                                            std::size_t index);
 
+/**
+ * The hash state after `tag(seed`, for deriving many scalars from one seed.
+ *
+ * A V4 seed carries the whole witness, several hundred kilobytes, and one
+ * proof derives tens of thousands of scalars from it. Hashing the seed for
+ * every scalar made that hashing the dominant cost of a proof. This absorbs
+ * the seed once; each scalar then finishes a copy of the state with its own
+ * labels. The digests are exactly those of hashing `seed || labels` in full.
+ *
+ * The state retains seed-derived bytes and is erased on destruction.
+ */
+class SeedHash {
+public:
+  SeedHash(const TaggedHash &tag, std::span<const unsigned char> seed);
+  ~SeedHash();
+  SeedHash(const SeedHash &) = delete;
+  SeedHash &operator=(const SeedHash &) = delete;
+
+  /** `tag(seed || labels...)`, with each label appended in order. */
+  [[nodiscard]] ScalarBytes
+  digest(std::span<const std::span<const unsigned char>> labels) const;
+
+private:
+  purify_sha256_prefix prefix_{};
+};
+
 Status derive_scalar(FieldElement &out, std::span<const unsigned char> seed,
                      const TaggedHash &tag, std::size_t index,
                      std::uint64_t attempt = 0);
+
+/** The scalar `derive_scalar` returns for the seed and tag behind `seed_hash`. */
+Status derive_scalar(FieldElement &out, const SeedHash &seed_hash,
+                     std::size_t index, std::uint64_t attempt = 0);
 
 Status derive_secret_nonzero_scalar(FieldElement &out,
                                     std::span<const unsigned char> seed,
