@@ -185,23 +185,34 @@ Result<PointBytes> point_from_scalar_base(const FieldElement &scalar,
 
 namespace {
 
-Result<PointBytes> add_scaled_points_allow_infinity(
-    const PointBytes &base_commitment,
+/**
+ * Sums `scalars[i] * points[i]` over public inputs in one multi-scalar
+ * multiplication. The result is a compressed point, or 33 zero bytes for the
+ * identity.
+ *
+ * Every caller passes public points and public scalars, so this uses the
+ * variable-time routine. Do not use it for witness values.
+ */
+Result<PointBytes> public_multi_scalar_mul(
     std::span<const PointBytes> points,
     std::span<const FieldElement> scalars,
     purify_secp_context *secp_context) {
   if (points.size() != scalars.size()) {
     return unexpected_error(ErrorCode::SizeMismatch);
   }
-  PointBytes out = base_commitment;
-  for (std::size_t i = 0; i < points.size(); ++i) {
-    if (scalars[i].is_zero()) {
-      continue;
-    }
-    PURIFY_ASSIGN_OR_RETURN(const auto &scaled,
-                            point_scale(points[i], scalars[i], secp_context));
-    PURIFY_ASSIGN_OR_RETURN(
-        out, point_add_allow_infinity(out, scaled, secp_context));
+  PURIFY_RETURN_IF_ERROR(require_secp_context(secp_context));
+  std::vector<ScalarBytes> encoded;
+  encoded.reserve(scalars.size());
+  for (const FieldElement &scalar : scalars) {
+    encoded.push_back(scalar.to_bytes_be());
+  }
+  PointBytes out{};
+  if (purify_bppp_public_msm(
+          secp_context,
+          reinterpret_cast<const unsigned char *>(points.data()),
+          reinterpret_cast<const unsigned char *>(encoded.data()),
+          points.size(), out.data()) == 0) {
+    return unexpected_error(ErrorCode::BackendRejectedInput);
   }
   return out;
 }
@@ -215,6 +226,11 @@ Result<PointBytes> circuit_anchored_offset_v4(
   if (public_commitments.size() !=
       public_data.public_commitment_coeffs.size()) {
     return unexpected_error(ErrorCode::SizeMismatch);
+  }
+  if (public_data.minus_shift.size() != public_data.plus_shift.size() ||
+      public_data.raw_generator_points.size() / 2 <
+          public_data.plus_shift.size()) {
+    return unexpected_error(ErrorCode::InternalMismatch);
   }
 
   std::vector<PointBytes> points;
@@ -239,8 +255,7 @@ Result<PointBytes> circuit_anchored_offset_v4(
     scalars.push_back(
         public_data.public_commitment_coeffs[i].negate());
   }
-  return add_scaled_points_allow_infinity(
-      PointBytes{}, points, scalars, secp_context);
+  return public_multi_scalar_mul(points, scalars, secp_context);
 }
 
 Result<PointBytes>
@@ -270,11 +285,19 @@ Result<PointBytes> coefficient_commitment_v4(
     return PointBytes{};
   }
 
-  NormArgInputs inputs;
-  inputs.generators = public_data.raw_generators;
-  inputs.n_vec.assign(public_data.n_vec_len, ScalarBytes{});
-  inputs.l_vec = public_data.c_vec_bytes;
-  return commit_norm_arg_witness_only(inputs, secp_context, nullptr);
+  // The coefficients are public, so this is one variable-time multi-scalar
+  // multiplication over the raw H generators that follow the G generators.
+  std::size_t generator_count = 0;
+  if (!(CheckedSize(public_data.n_vec_len) + public_data.c_vec.size())
+           .store(generator_count) ||
+      public_data.raw_generator_points.size() != generator_count) {
+    return unexpected_error(ErrorCode::InternalMismatch);
+  }
+  const auto coefficient_generators =
+      std::span(public_data.raw_generator_points)
+          .subspan(public_data.n_vec_len, public_data.c_vec.size());
+  return public_multi_scalar_mul(coefficient_generators, public_data.c_vec,
+                                 secp_context);
 }
 
 Result<PointBytes>

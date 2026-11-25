@@ -536,10 +536,11 @@ derive_circuit_norm_parent_constants_v4_impl(
   const CircuitNormArgChallenges challenges{
       transcript.rho().scalar, transcript.mul_scale().scalar,
       transcript.mul_ratio().scalar, transcript.row_ratio().scalar};
+  // The descriptor uses only raw generators, so the scaled set is skipped.
   PURIFY_ASSIGN_OR_RETURN(
       const auto public_data,
       build_circuit_norm_arg_public_data_from_challenges(
-          circuit, secp_context, true, challenges));
+          circuit, secp_context, true, challenges, false));
   if (generator_backend_cache_key(public_data->raw_generators) !=
       raw_generator_digest) {
     return unexpected_error(ErrorCode::InternalMismatch);

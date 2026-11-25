@@ -83,11 +83,19 @@ Result<CircuitNormArgPublicDataPtr> build_circuit_norm_arg_public_data(
     bool externalize_commitments = false,
     const CircuitNormArgChallenges *explicit_challenges = nullptr);
 
+/**
+ * Builds the public reduction data for explicit challenges.
+ *
+ * With `scale_generators` cleared the norm-argument generators are left
+ * empty. The coefficient vector, shifts, target and raw generators are still
+ * complete, which is all a parent descriptor needs.
+ */
 Result<CircuitNormArgPublicDataPtr>
 build_circuit_norm_arg_public_data_from_challenges(
     const NativeBulletproofCircuit &circuit,
     purify_secp_context *secp_context, bool externalize_commitments,
-    const CircuitNormArgChallenges &explicit_challenges);
+    const CircuitNormArgChallenges &explicit_challenges,
+    bool scale_generators = true);
 
 Result<CircuitNormArgReduction> reduce_experimental_circuit_to_norm_arg(
     const NativeBulletproofCircuit &circuit,

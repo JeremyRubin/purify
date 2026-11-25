@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
+#include <mutex>
 #include <optional>
 #include <span>
 #include <type_traits>
@@ -132,13 +133,12 @@ GeneratorBytes value_generator_h(purify_secp_context *secp_context) {
   return out;
 }
 
-Result<std::vector<PointBytes>> create_generators(std::size_t count,
-                                                  purify_secp_context *secp_context) {
+namespace {
+
+/** Derives the first `count` generators of the stream from scratch. */
+Result<std::vector<PointBytes>>
+generate_generators(std::size_t count, purify_secp_context *secp_context) {
   std::vector<PointBytes> out(count);
-  if (count == 0) {
-    return out;
-  }
-  PURIFY_RETURN_IF_ERROR(require_secp_context(secp_context));
   std::span<unsigned char> serialized = writable_byte_span(out);
   std::size_t serialized_len = serialized.size();
   if (purify_bppp_create_generators(secp_context, count, serialized.data(),
@@ -150,6 +150,106 @@ Result<std::vector<PointBytes>> create_generators(std::size_t count,
   }
   return out;
 }
+
+/** Converts generator encodings to compressed SEC1 points. */
+Result<std::vector<PointBytes>>
+generators_to_points(std::span<const PointBytes> generators,
+                     purify_secp_context *secp_context) {
+  std::vector<PointBytes> out(generators.size());
+  if (generators.empty()) {
+    return out;
+  }
+  if (purify_bppp_generators_to_points(
+          secp_context,
+          reinterpret_cast<const unsigned char *>(generators.data()),
+          generators.size(),
+          reinterpret_cast<unsigned char *>(out.data())) == 0) {
+    return unexpected_error(ErrorCode::BackendRejectedInput);
+  }
+  return out;
+}
+
+/**
+ * The BPPP generator stream, derived once per process.
+ *
+ * The backend derives generator `i` from a fixed public seed and the
+ * generators before it, so every request is a prefix of one stream and does
+ * not depend on the context. Each generator costs a hash-to-curve. A V4 leaf
+ * uses 32,768 of them, and deriving them afresh for every proof, preparation
+ * and parent descriptor was the largest single cost of each.
+ *
+ * Requests above the cap bypass the cache, which bounds its memory to a few
+ * megabytes.
+ */
+struct GeneratorStream {
+  static constexpr std::size_t kMaxCached = std::size_t{1} << 17;
+
+  std::mutex mutex;
+  std::vector<PointBytes> generators;
+  std::vector<PointBytes> points;
+};
+
+GeneratorStream &generator_stream() {
+  static GeneratorStream stream;
+  return stream;
+}
+
+} // namespace
+
+Result<std::vector<PointBytes>> create_generators(std::size_t count,
+                                                  purify_secp_context *secp_context) {
+  if (count == 0) {
+    return std::vector<PointBytes>{};
+  }
+  PURIFY_RETURN_IF_ERROR(require_secp_context(secp_context));
+  if (count > GeneratorStream::kMaxCached) {
+    return generate_generators(count, secp_context);
+  }
+  GeneratorStream &stream = generator_stream();
+  const std::lock_guard lock(stream.mutex);
+  if (stream.generators.size() < count) {
+    PURIFY_ASSIGN_OR_RETURN(auto generated,
+                            generate_generators(count, secp_context));
+    stream.generators = std::move(generated);
+    stream.points.clear();
+  }
+  return std::vector<PointBytes>(
+      stream.generators.begin(),
+      stream.generators.begin() + static_cast<std::ptrdiff_t>(count));
+}
+
+namespace detail {
+
+Result<std::vector<PointBytes>>
+create_generator_points(std::size_t count, purify_secp_context *secp_context) {
+  if (count == 0) {
+    return std::vector<PointBytes>{};
+  }
+  PURIFY_RETURN_IF_ERROR(require_secp_context(secp_context));
+  if (count > GeneratorStream::kMaxCached) {
+    PURIFY_ASSIGN_OR_RETURN(const auto generators,
+                            generate_generators(count, secp_context));
+    return generators_to_points(generators, secp_context);
+  }
+  GeneratorStream &stream = generator_stream();
+  const std::lock_guard lock(stream.mutex);
+  if (stream.generators.size() < count) {
+    PURIFY_ASSIGN_OR_RETURN(auto generated,
+                            generate_generators(count, secp_context));
+    stream.generators = std::move(generated);
+    stream.points.clear();
+  }
+  if (stream.points.size() < count) {
+    PURIFY_ASSIGN_OR_RETURN(
+        auto points, generators_to_points(stream.generators, secp_context));
+    stream.points = std::move(points);
+  }
+  return std::vector<PointBytes>(
+      stream.points.begin(),
+      stream.points.begin() + static_cast<std::ptrdiff_t>(count));
+}
+
+} // namespace detail
 
 Result<PointBytes>
 commit_norm_arg_with_cache(const NormArgInputs &inputs,

@@ -95,6 +95,13 @@ ResolvedBpppGeneratorBackend resolve_bppp_generator_backend(
 
 Result<std::size_t> round_up_power_of_two(std::size_t value);
 
+/**
+ * The first `count` generators of the stream `create_generators` returns, as
+ * compressed SEC1 points. Both encodings are derived once per process.
+ */
+Result<std::vector<PointBytes>>
+create_generator_points(std::size_t count, purify_secp_context *secp_context);
+
 Result<FieldElement> derive_nonzero_scalar(std::span<const unsigned char> seed,
                                            const TaggedHash& tag,
                                            std::size_t index);

@@ -303,34 +303,39 @@ std::shared_ptr<CircuitNormArgPublicData> fold_circuit_constraints(
 }
 
 /**
- * Creates the raw generators and scales the i-th G generator by rho^(i+1)
- * over its multiplication term; the H generators stay raw.
+ * Installs the raw generators and, when `scale` is set, scales the i-th G
+ * generator by rho^(i+1) over its multiplication term; the H generators stay
+ * raw.
+ *
+ * Without `scale` the norm-argument generators are left empty. That is enough
+ * for the values a parent descriptor needs (the coefficient commitment and the
+ * anchored offset use only raw generators) and it skips one scalar
+ * multiplication per G generator.
  */
-Status scale_reduction_generators(
+Status install_reduction_generators(
     const std::shared_ptr<CircuitNormArgPublicData> &out,
-    const CircuitNormArgDimensions &dimensions,
-    const FieldElement &sqrt_minus_one, purify_secp_context *secp_context) {
+    const FieldElement &sqrt_minus_one, purify_secp_context *secp_context,
+    bool scale) {
   const FieldElement &rho = out->rho;
   const FieldElement &mul_scale = out->mul_scale;
   const FieldElement &mul_ratio = out->mul_ratio;
 
-  std::size_t raw_n_value_count = 0;
   std::size_t generator_count = 0;
-  if (!(CheckedSize(dimensions.gate_count) * 2).store(raw_n_value_count) ||
-      !(CheckedSize(out->n_vec_len) + out->c_vec.size())
+  if (!(CheckedSize(out->n_vec_len) + out->c_vec.size())
            .store(generator_count)) {
     return unexpected_error(ErrorCode::Overflow);
   }
   PURIFY_ASSIGN_OR_RETURN(auto generators,
                           create_generators(generator_count, secp_context));
+  PURIFY_ASSIGN_OR_RETURN(
+      out->raw_generator_points,
+      create_generator_points(generator_count, secp_context));
+  if (!scale) {
+    out->raw_generators = std::move(generators);
+    return {};
+  }
   out->raw_generators = generators;
   out->generators = std::move(generators);
-  out->raw_generator_points.reserve(raw_n_value_count);
-  for (std::size_t i = 0; i < raw_n_value_count; ++i) {
-    PURIFY_ASSIGN_OR_RETURN(
-        auto point, generator_to_point(out->raw_generators[i], secp_context));
-    out->raw_generator_points.push_back(point);
-  }
 
   FieldElement rho_power = rho;
   FieldElement generator_term = mul_scale;
@@ -355,7 +360,8 @@ Result<CircuitNormArgPublicDataPtr> build_circuit_norm_arg_public_data_impl(
     const PointBytes *raw_commitment,
     purify_secp_context *secp_context,
     bool externalize_commitments = false,
-    const CircuitNormArgChallenges *explicit_challenges = nullptr) {
+    const CircuitNormArgChallenges *explicit_challenges = nullptr,
+    bool scale_generators = true) {
   PURIFY_RETURN_IF_ERROR(require_secp_context(secp_context));
   if (!circuit.has_valid_shape()) {
     return unexpected_error(ErrorCode::InvalidDimensions);
@@ -376,8 +382,8 @@ Result<CircuitNormArgPublicDataPtr> build_circuit_norm_arg_public_data_impl(
 
   auto out = fold_circuit_constraints(circuit, dimensions, challenges,
                                       sqrt_minus_one, externalize_commitments);
-  PURIFY_RETURN_IF_ERROR(scale_reduction_generators(out, dimensions,
-                                                    sqrt_minus_one, secp_context));
+  PURIFY_RETURN_IF_ERROR(install_reduction_generators(
+      out, sqrt_minus_one, secp_context, scale_generators));
   CircuitNormArgPublicDataPtr shared = out;
   return shared;
 }
@@ -402,10 +408,11 @@ Result<CircuitNormArgPublicDataPtr>
 build_circuit_norm_arg_public_data_from_challenges(
     const NativeBulletproofCircuit &circuit,
     purify_secp_context *secp_context, bool externalize_commitments,
-    const CircuitNormArgChallenges &explicit_challenges) {
+    const CircuitNormArgChallenges &explicit_challenges,
+    bool scale_generators) {
   return build_circuit_norm_arg_public_data_impl(
       circuit, {}, nullptr, secp_context, externalize_commitments,
-      &explicit_challenges);
+      &explicit_challenges, scale_generators);
 }
 
 Result<CircuitNormArgReduction> reduce_experimental_circuit_to_norm_arg(
