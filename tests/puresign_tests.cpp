@@ -2,6 +2,7 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or https://opensource.org/license/mit/.
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <iostream>
@@ -193,13 +194,13 @@ constexpr PinnedSigningVectors kBulletproofVectors{
     .message_nonce = "af107e7489139e49674ccb97a2ff0fd63aa4f758d058ec6778d99bc1fc7c13a3",
     .message_signature = "af107e7489139e49674ccb97a2ff0fd63aa4f758d058ec6778d99bc1fc7c13a3"
                          "d099373b87ed7b4a616925e54eb0262f5c1e15dfc2c551323d966c73b1f90b1d",
-    .message_nonce_proof_sha256 = "63c060b86985df5e6d443de4baa30d7e8dac8b272c92e1366397e05e4aea9cf3",
-    .message_proven_signature_sha256 = "251eeba7de234814338cc1efc8b14a4c7c507581f5f2e058321b347f1199a3d7",
+    .message_nonce_proof_sha256 = "8bb80173661f1678fa645e49d3c381b032ab1779074023634b7ca6596fc611ce",
+    .message_proven_signature_sha256 = "07675de726a0fc02f5b467f88980194e2deec598080ddf204070f8f7c22dd0f4",
     .topic_nonce = "0da0cb5c9169b21dfbe0d46da89133a82ce4d7c66c52966e24b9114c80cb4bc5",
     .topic_signature = "0da0cb5c9169b21dfbe0d46da89133a82ce4d7c66c52966e24b9114c80cb4bc5"
                          "c624f97a32661399cb823e8c9430aafceab58791aa883f3e4892121406a9aebe",
-    .topic_nonce_proof_sha256 = "7cee668e645725b0e682c15eec2cd6abe67e16c815c21df306059dc1f8a1a285",
-    .topic_proven_signature_sha256 = "3a102f5bbf3820c0059321f4caba907e7c5c97488e428c7e53bc7d9740047988",
+    .topic_nonce_proof_sha256 = "fbaf0e8c3ab8387210beafbd8825fa94115dc618b9553a54d903b6da6f74fb09",
+    .topic_proven_signature_sha256 = "c4b4ce0caa15806800ee166acba6d787c5286b97a695a79dd7189b0a566caf12",
 };
 
 constexpr PinnedSigningVectors kBpppVectors{
@@ -219,13 +220,13 @@ constexpr PinnedSigningVectors kBulletproofVectors{
     .message_nonce = "489376c6dab8a30fde84c19c7448b29dc401826a8e0c14510d5804a7a051bd4f",
     .message_signature = "489376c6dab8a30fde84c19c7448b29dc401826a8e0c14510d5804a7a051bd4f"
                          "fc98d4f408047c0354a8b0634b43a6bceb63d90c0fe6e1333c69761b5314c553",
-    .message_nonce_proof_sha256 = "6f5637891d10399004a430fbb7574731fcffc3d129e5be63d1e314186e74ea30",
-    .message_proven_signature_sha256 = "73b6dcd3239acc94be3a0fbdef62ceaaed2177b2dfefd4dc3d274887d3b725bd",
+    .message_nonce_proof_sha256 = "f85b7b3173154544de7fac5af50e289b020ecc53049992a348872fe1842c2162",
+    .message_proven_signature_sha256 = "4561d27e438ca8cda321a46771379230334cf344f8596172a69e13b207dd656a",
     .topic_nonce = "4492ce5bc4ddddb3e89c9630248047411c2807645a3ad9d36b723d09e9811334",
     .topic_signature = "4492ce5bc4ddddb3e89c9630248047411c2807645a3ad9d36b723d09e9811334"
                          "8907b863f889792099fae4f7c266ca0138df01fb2a07384627a4a51487c5307d",
-    .topic_nonce_proof_sha256 = "4a975d130ee4a4485de065efe8f5c3be4dfb2d149f11bd4c1b8fe8371d18792a",
-    .topic_proven_signature_sha256 = "786f7c1d884afa8506de8183ee910bfda54db7621772cebde9ff11ae1d395ba0",
+    .topic_nonce_proof_sha256 = "29b975be57f44068dbb1ef9fe3457b201367f9924ad4b059478c95d865763017",
+    .topic_proven_signature_sha256 = "5563a4cdee8f3864230c6c6e723a57d2eb57af1d58ed4194ee6463ba083eb61b",
 };
 
 constexpr PinnedSigningVectors kBpppVectors{
@@ -351,8 +352,8 @@ void test_puresign_message_signing(TestContext& ctx) {
         Result<Bytes> nonce_proof_bytes = proven->nonce_proof.serialize(context.get());
         expect_ok(ctx, nonce_proof_bytes, "NonceProof serializes");
         if (nonce_proof_bytes.has_value()) {
-            ctx.expect(!nonce_proof_bytes->empty() && (*nonce_proof_bytes)[0] == 2,
-                       "NonceProof uses the unique-derivation wire format version");
+            ctx.expect(!nonce_proof_bytes->empty() && (*nonce_proof_bytes)[0] == 3,
+                       "NonceProof uses the exact-point wire format version");
             Result<purify::puresign::NonceProof> parsed_nonce_proof =
                 purify::puresign::NonceProof::deserialize(*nonce_proof_bytes, context.get());
             expect_ok(ctx, parsed_nonce_proof, "NonceProof round-trips");
@@ -369,6 +370,20 @@ void test_puresign_message_signing(TestContext& ctx) {
             expect_error(ctx, purify::puresign::NonceProof::deserialize(legacy_nonce_proof, context.get()),
                          ErrorCode::BackendRejectedInput,
                          "NonceProof rejects the old counter-bearing wire format");
+
+            Bytes unpinned_nonce_proof = *nonce_proof_bytes;
+            unpinned_nonce_proof[0] = 2;
+            expect_error(ctx, purify::puresign::NonceProof::deserialize(unpinned_nonce_proof, context.get()),
+                         ErrorCode::BackendRejectedInput,
+                         "NonceProof rejects the version without an exact-point proof");
+
+            // The exact-point response sits after the version, the length and two x coordinates.
+            Bytes zero_response_nonce_proof = *nonce_proof_bytes;
+            std::fill_n(zero_response_nonce_proof.begin() + 69, 32, static_cast<unsigned char>(0));
+            expect_error(ctx,
+                         purify::puresign::NonceProof::deserialize(zero_response_nonce_proof, context.get()),
+                         ErrorCode::BackendRejectedInput,
+                         "NonceProof rejects a zero exact-point response");
         }
 
         Result<Bytes> proven_bytes = proven->serialize(context.get());
@@ -457,6 +472,92 @@ void test_puresign_message_signing(TestContext& ctx) {
             ctx.expect(*reparsed_verified, "parsed PureSign artifacts verify");
         }
     }
+}
+
+/**
+ * The Bulletproof accepts a commitment `o*G + b*H` to the Purify output for any blind `b`.
+ * Without the exact-point proof a key holder could therefore present a different "proven"
+ * nonce for the same key and message with every new `b`.
+ */
+void test_puresign_bulletproof_nonce_is_unique(TestContext& ctx) {
+    Result<SecretKey> secret = sample_secret();
+    expect_ok(ctx, secret, "sample secret parses for the unique-nonce check");
+    purify::SecpContextPtr context = make_test_secp_context(ctx);
+    if (!secret.has_value() || context == nullptr) {
+        return;
+    }
+    const Bytes message = sample_message();
+    Result<purify::puresign::KeyPair> key_pair = purify::puresign::KeyPair::from_secret(*secret, context.get());
+    Result<purify::puresign::MessageProofCache> cache = purify::puresign::MessageProofCache::build(message);
+    expect_ok(ctx, key_pair, "unique-nonce fixture derives the key pair");
+    expect_ok(ctx, cache, "unique-nonce fixture builds the message template");
+    if (!key_pair.has_value() || !cache.has_value()) {
+        return;
+    }
+    const purify::puresign::PublicKey& public_key = key_pair->public_key();
+    Result<purify::puresign::PreparedNonceWithProof> honest =
+        key_pair->prepare_message_nonce_with_proof(message, context.get());
+    expect_ok(ctx, honest, "unique-nonce fixture prepares the honest proof");
+    if (!honest.has_value()) {
+        return;
+    }
+    Result<bool> honest_ok = public_key.verify_message_nonce_proof(message, honest->proof(), context.get());
+    ctx.expect(honest_ok.has_value() && *honest_ok, "the honest nonce proof verifies");
+
+    // Prove the same statement again, but commit to the output with a nonzero blind.
+    Result<purify::BulletproofWitnessData> witness = purify::prove_assignment_data(cache->eval_input, *secret);
+    expect_ok(ctx, witness, "unique-nonce fixture derives the witness");
+    if (!witness.has_value()) {
+        return;
+    }
+    Result<purify::NativeBulletproofCircuit> circuit = cache->circuit_template.instantiate(witness->public_key);
+    expect_ok(ctx, circuit, "unique-nonce fixture instantiates the circuit");
+    if (!circuit.has_value()) {
+        return;
+    }
+    const Bytes binding = purify::bytes_from_ascii("PureSign/Proof/Message/V1");
+    const auto generator = purify::bppp::base_generator(context.get());
+    purify::BulletproofScalarBytes seed{};
+    seed.fill(0x6b);
+    std::array<purify::BulletproofScalarBytes, 1> blinds{};
+    blinds[0].back() = 9;
+    Result<purify::ExperimentalBulletproofProof> blinded = purify::prove_experimental_circuit(
+        *circuit, witness->assignment, seed, generator, context.get(), binding, blinds);
+    expect_ok(ctx, blinded, "a blinded proof of the same statement constructs");
+    if (!blinded.has_value() || blinded->commitments.size() != 1) {
+        return;
+    }
+    Result<bool> blinded_circuit_ok =
+        purify::verify_experimental_circuit(*circuit, *blinded, generator, context.get(), binding);
+    ctx.expect(blinded_circuit_ok.has_value() && *blinded_circuit_ok,
+               "the Bulletproof alone accepts the blinded commitment");
+
+    purify::puresign::NonceProof forged{};
+    forged.proof = *blinded;
+    int parity = 0;
+    ctx.expect(purify_bip340_xonly_from_point(context.get(), forged.proof.commitments.front().data(),
+                                              forged.nonce.xonly.data(), &parity) != 0,
+               "the blinded commitment is a valid point");
+    ctx.expect(forged.nonce.xonly != honest->public_nonce().xonly,
+               "the blinded commitment names a different nonce");
+    // The forger cannot produce an exact-point proof for the blinded point. Replaying the
+    // honest one is the closest available input.
+    forged.exact_point_nonce = honest->proof().exact_point_nonce;
+    forged.exact_point_response = honest->proof().exact_point_response;
+    Result<bool> forged_ok = public_key.verify_message_nonce_proof(message, forged, context.get());
+    ctx.expect(forged_ok.has_value() && !*forged_ok, "a second nonce for the same key and message is rejected");
+
+    purify::puresign::NonceProof wrong_response = honest->proof();
+    wrong_response.exact_point_response.back() ^= 1;
+    Result<bool> wrong_response_ok =
+        public_key.verify_message_nonce_proof(message, wrong_response, context.get());
+    ctx.expect(wrong_response_ok.has_value() && !*wrong_response_ok,
+               "a changed exact-point response is rejected");
+
+    purify::puresign::NonceProof zero_response = honest->proof();
+    zero_response.exact_point_response.fill(0);
+    Result<bool> zero_response_ok = public_key.verify_message_nonce_proof(message, zero_response, context.get());
+    ctx.expect(zero_response_ok.has_value() && !*zero_response_ok, "a zero exact-point response is rejected");
 }
 
 void test_puresign_topic_signing(TestContext& ctx) {
@@ -1210,6 +1311,7 @@ void test_puresign_plusplus_topic_proof_cache_clone_for_thread(TestContext& ctx)
 void run_puresign_tests(purify_test::TestContext& ctx) {
     test_puresign_pinned_signing_vectors(ctx);
     test_puresign_message_signing(ctx);
+    test_puresign_bulletproof_nonce_is_unique(ctx);
     test_puresign_topic_signing(ctx);
     test_puresign_topic_proof_cache_clone_for_thread(ctx);
     test_puresign_binding_checks(ctx);
